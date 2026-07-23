@@ -1,0 +1,36 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+*.user
+
+# Installer build output (dist\ToPlaySetup.exe) + embedded payload zip
+dist/
+src/ToPlay.Installer/payload/
+
+# Loose binaries / extracted downloads that sometimes land at the repo root
+# (the shippable ToPlaySetup.exe lives in dist\; ffmpeg is fetched into
+# src\ToPlay.Host\tools\). None of these belong in the repo.
+/ToPlay.exe
+/ToPlaySetup.exe
+/ffmpeg-*/
+
+# Internal notes kept out of the public repo (remove this line to publish it)
+/READMEinside.md
+
+
+
+
+# Runtime data (accounts DB, config, generated TLS cert)
+**/data/
+*.pfx
+
+# Bundled ffmpeg (downloaded by scripts/get-ffmpeg.ps1)
+src/ToPlay.Host/tools/
+
+# IDE
+.vs/
+.idea/
+*.suo
+
+# Logs
+*.log

@@ -1,0 +1,316 @@
+:root {
+  --bg: #0b0f17;
+  --panel: #131a26;
+  --border: #223049;
+  --text: #e6edf7;
+  --muted: #8aa0c0;
+  --accent: #1f6feb;
+  --danger: #e5534b;
+  --ok: #3fb950;
+  --edge-margin: 4px;    /* buffer kept clear of the phone's edge gesture zones */
+
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---------- Auth / admin cards ---------- */
+
+.center {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* The sign-in screen is pure black (looks cleaner on the phone before the
+   stream fills the display). */
+body.login-page { background: #000; }
+body.login-page .card {
+  background: #05070c;
+  border-color: #10151f;
+}
+
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+}
+
+.card h1 { margin: 0 0 4px; font-size: 22px; }
+.card p.sub { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+
+label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+
+input[type=text], input[type=password] {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0d131e;
+  color: var(--text);
+  font-size: 16px;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  color: white;
+  background: var(--accent);
+}
+button.secondary { background: #24314a; }
+button.danger { background: var(--danger); }
+button:disabled { opacity: .55; cursor: default; }
+
+.btn-row { display: flex; gap: 10px; margin-top: 20px; }
+.btn-row button { flex: 1; }
+
+.msg { margin-top: 14px; font-size: 14px; min-height: 18px; }
+.msg.error { color: var(--danger); }
+.msg.ok { color: var(--ok); }
+
+a { color: var(--accent); text-decoration: none; }
+
+table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #24314a; color: var(--muted); }
+
+/* ---------- Player ---------- */
+
+#stage {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  overflow: hidden;
+  /* Inset the video from the physical screen edges. The phone's status /
+     notification bar and home-indicator swallow touches right at the edge,
+     so without a buffer the PC's top window buttons and bottom taskbar are
+     unreachable. We take the LARGER of the OS safe-area and --edge-margin
+     (not the sum) so the border stays as small as possible — just enough to
+     clear the notch/home-indicator. --edge-margin is tunable (Settings ›
+     Edge margin) if you still can't reach the very edge. */
+  padding:
+    max(env(safe-area-inset-top, 0px), var(--edge-margin))
+    max(env(safe-area-inset-right, 0px), var(--edge-margin))
+    max(env(safe-area-inset-bottom, 0px), var(--edge-margin))
+    max(env(safe-area-inset-left, 0px), var(--edge-margin));
+
+}
+
+#video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;      /* keep whole PC screen visible; toggled to 'fill' */
+  background: #000;
+  touch-action: none;       /* we handle all touches ourselves */
+}
+
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(4, 8, 15, .82);
+  text-align: center;
+  padding: 24px;
+}
+#overlay.hidden { display: none; }
+#overlay h1 { margin: 0; font-size: 24px; }
+#overlay .status { color: var(--muted); font-size: 14px; max-width: 480px; }
+#overlay button { min-width: 200px; padding: 16px; font-size: 18px; }
+
+/* Sit in the right letterbox bar (a 16:9 PC screen leaves black bars on a wide
+   phone) so the buttons never cover the game's controls. */
+#hud {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 6px);
+  top: 50%;
+
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 7;
+  transition: opacity .25s;
+}
+#hud button {
+  padding: 8px 12px;
+  font-size: 13px;
+  background: rgba(19,26,38,.75);
+  border: 1px solid var(--border);
+}
+/* While playing the HUD auto-hides so its buttons never sit on top of the
+   game's controls. Hidden = invisible AND click-through (taps reach the PC). */
+body.hud-hidden #hud { opacity: 0; pointer-events: none; }
+
+/* Tiny right-edge handle to bring the HUD back without covering game controls. */
+#grip {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  width: 22px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--muted);
+  background: rgba(19,26,38,.5);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  opacity: .5;
+}
+
+/* No handle needed while the connect screen or settings modal is up. */
+#overlay:not(.hidden) ~ #grip,
+#settings:not(.hidden) ~ #grip { display: none; }
+
+#settings {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4,8,15,.88);
+  z-index: 10;
+  padding: 20px;
+}
+#settings.hidden { display: none; }
+/* Cap the card to the viewport and let it scroll internally — otherwise in
+   landscape the lower fields and the Apply/Close buttons fall off-screen. */
+#settings .card {
+  max-width: 460px;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+
+select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0d131e;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.pill {
+  position: fixed;
+  bottom: env(safe-area-inset-bottom, 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(19,26,38,.8);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  z-index: 5;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .3s;
+}
+.pill.show { opacity: 1; }
+
+/* Portrait-only hint: the PC screen is 16:9, so on a portrait phone it can
+   only occupy a horizontal band (letterbox). Rotating to landscape lets the
+   video fill the display. Pure CSS — no JS needed. */
+#rotate {
+  position: fixed;
+  left: 50%;
+  bottom: 16%;
+  transform: translateX(-50%);
+  background: rgba(19,26,38,.92);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: center;
+  padding: 10px 16px;
+  border-radius: 999px;
+  max-width: 80vw;
+  z-index: 6;
+  pointer-events: none;
+  display: none;
+}
+@media (orientation: portrait) {
+  #rotate { display: block; }
+}
+/* Don't show the hint over the connect screen or the settings modal. */
+#overlay:not(.hidden) ~ #rotate,
+#settings:not(.hidden) ~ #rotate { display: none; }
+
+/* ---------- PWA install help ---------- */
+
+.install-mask {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 8, 15, .92);
+  z-index: 60;
+  padding: 20px;
+}
+.install-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.install-card h2 { margin: 0 0 6px; font-size: 20px; }
+.install-card p { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 8px 0; }
+.install-card ol { color: var(--text); font-size: 14px; line-height: 1.7; padding-left: 20px; margin: 8px 0; }
+.install-card ol li { margin: 4px 0; }
+.install-card a { color: var(--accent); }
+.install-note {
+  border-top: 1px solid var(--border);
+  margin-top: 14px !important;
+  padding-top: 12px;
+  font-size: 13px;
+}
+
+/* Quiet, borderless "Don't show again" action. */
+.link-btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  background: none;
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 13px;
+  padding: 6px;
+}
+
+
+
+

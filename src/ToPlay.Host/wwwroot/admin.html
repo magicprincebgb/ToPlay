@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ToPlay — Accounts</title>
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="stylesheet" href="/css/styles.css" />
+
+</head>
+<body>
+  <div class="center">
+    <div class="card" style="max-width:560px">
+      <h1>Accounts</h1>
+      <p class="sub">Create the accounts your phones will use to sign in. (Manage from the host PC.)</p>
+
+      <label for="u">Username</label>
+      <input id="u" type="text" autocapitalize="none" autocorrect="off" />
+
+      <label for="p">Password</label>
+      <input id="p" type="password" />
+
+      <div class="btn-row">
+        <button id="create">Create account</button>
+        <button id="refresh" class="secondary">Refresh</button>
+      </div>
+      <div class="msg" id="msg"></div>
+
+      <table id="tbl">
+        <thead><tr><th>User</th><th>Role</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>

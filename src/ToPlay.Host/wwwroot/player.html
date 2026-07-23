@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>ToPlay</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="stylesheet" href="/css/styles.css" />
+
+</head>
+<body>
+  <div id="stage">
+    <video id="video" playsinline autoplay muted></video>
+  </div>
+
+  <div id="hud">
+    <button id="btn-back" title="Tap: Back (Esc) · Hold: close window (Alt+F4)">Back</button>
+    <button id="btn-settings">Settings</button>
+    <button id="btn-quit" class="secondary">Quit</button>
+  </div>
+
+
+  <div id="pill" class="pill"></div>
+
+  <div id="overlay">
+
+    <h1>ToPlay</h1>
+    <div class="status" id="ov-status">Ready to connect.</div>
+    <button id="btn-connect">Tap to start</button>
+  </div>
+
+  <div id="settings" class="hidden">
+    <div class="card">
+      <h1>Settings</h1>
+      <p class="sub" id="set-status"></p>
+
+      <label for="preset">Quality</label>
+      <select id="preset"></select>
+
+      <label for="monitor">Monitor</label>
+      <select id="monitor"></select>
+
+      <label for="encoder">Encoder</label>
+      <select id="encoder">
+        <option value="Auto">Auto (recommended)</option>
+        <option value="Nvenc">NVIDIA (NVENC)</option>
+        <option value="QuickSync">Intel (QuickSync)</option>
+        <option value="Amf">AMD (AMF)</option>
+        <option value="Software">Software (x264)</option>
+      </select>
+
+      <label for="fit">Screen fit</label>
+      <select id="fit">
+        <option value="contain">Fit whole screen (letterbox)</option>
+        <option value="fill">Stretch to fill</option>
+      </select>
+
+      <label for="edge">Edge margin (reach the taskbar &amp; top buttons)</label>
+      <select id="edge">
+        <option value="0">None (biggest screen)</option>
+        <option value="4">Minimal</option>
+        <option value="12">Small</option>
+        <option value="24">Large</option>
+      </select>
+
+
+      <div class="btn-row">
+        <button id="set-apply">Apply</button>
+        <button id="set-close" class="secondary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="rotate">&#8635; Rotate your phone to landscape for full screen</div>
+
+  <!-- Tiny handle that re-shows the auto-hidden HUD without blocking the game. -->
+  <div id="grip">&#8942;</div>
+
+  <script type="module" src="/js/player.js"></script>
+
+</body>
+</html>

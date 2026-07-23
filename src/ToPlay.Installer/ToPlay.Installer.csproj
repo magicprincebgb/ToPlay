@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- The shipped installer is "ToPlaySetup.exe" (a.k.a. installer.exe). -->
+    <AssemblyName>ToPlaySetup</AssemblyName>
+    <RootNamespace>ToPlay.Installer</RootNamespace>
+    <ApplicationIcon>..\ToPlay.App\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Windows-only. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <!-- The application payload (published host + app) is embedded as a single
+       zip so the installer is one self-contained .exe. The zip is produced by
+       scripts\build-installer.cmd right before this project is published; the
+       Condition lets a bare "build" succeed for verification without it. -->
+  <ItemGroup>
+    <EmbeddedResource Include="payload\app.zip"
+                      LogicalName="ToPlay.payload.zip"
+                      Condition="Exists('payload\app.zip')" />
+  </ItemGroup>
+
+</Project>

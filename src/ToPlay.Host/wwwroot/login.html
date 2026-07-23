@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>ToPlay — Sign in</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body class="login-page">
+
+  <div class="center">
+    <form class="card" id="form">
+      <h1>ToPlay</h1>
+      <p class="sub">Sign in to stream your PC to this device.</p>
+
+      <label for="u">Username</label>
+      <input id="u" type="text" autocomplete="username" autocapitalize="none" autocorrect="off" required />
+
+      <label for="p">Password</label>
+      <input id="p" type="password" autocomplete="current-password" required />
+
+      <div class="btn-row">
+        <button type="submit" id="go">Sign in</button>
+      </div>
+      <div class="msg" id="msg"></div>
+      <p class="sub" style="margin-top:18px">
+        New accounts are created on the host PC at
+        <a href="/admin.html">/admin.html</a>.
+      </p>
+    </form>
+  </div>
+
+  <script type="module" src="/js/login.js"></script>
+</body>
+</html>
