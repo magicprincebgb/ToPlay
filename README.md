@@ -12,7 +12,12 @@ powerful PC while you touch‑control it from your phone.
   if a browser can't negotiate audio it silently falls back to video‑only so the
   stream never goes black.
 - **Input:** phone touches → Windows Touch Injection (real multi‑touch), plus a
-  **Back** button that sends Esc / Alt+F4 to the PC.
+  **Back** button (tap = Esc, hold = Alt+F4) and an **on‑screen keyboard** (the
+  **Keys** button) that types straight into the focused app/field on the PC.
+- **Live latency readout:** a colour‑coded round‑trip **ping** meter in the
+  corner shows your real input lag at a glance (green under 60 ms) — measured on
+  the very data channel your touches travel over.
+
 
 - **Accounts:** created **on the PC**, used to **log in from phones** on the LAN.
 - **Trusted HTTPS:** a tiny built‑in Certificate Authority makes the browser on
@@ -108,7 +113,12 @@ can't self‑register.
    also where the **Back** button lives: a quick **tap** sends **Esc** (go back /
    close a menu — and the Android *Back* button inside emulators like LDPlayer, so
    it backs out in MLBB); **press and hold** sends **Alt+F4** to close the focused
-   window/program.
+   window/program. The same bar also has a **Keys** button — it pops your phone's
+   keyboard and types straight into whatever field is focused on the PC — and a
+   small **latency (ping) readout** that turns green when input lag is low. The
+   HUD auto‑hides while you play; tap the tiny **⋮ grip** at the top to bring it
+   back.
+
 
 
 > **One phone at a time.** Each host serves a single viewer. If a second phone
@@ -128,7 +138,11 @@ You can switch:
   & bandwidth.
 - **Encoder** — Auto, NVENC, QuickSync, AMF, or Software. If one doesn't work on
   your machine, just pick another; Auto falls back down the list automatically.
+- **PC sound** — turn **PC → phone audio** on or off (default **off**, video
+  only). Switching it briefly reconnects the stream so the change takes effect
+  right away. On iOS you may get a one‑tap "enable PC sound" prompt the first time.
 - **Monitor** — pick which display to stream (multi‑monitor setups).
+
 - **Fit** — *contain* (letterboxed, correct aspect) or *fill* (stretch to screen).
 - **Edge margin** — how much safe‑area padding to keep around the video
   (None / Minimal / Small / Large) to clear a notch or home indicator.

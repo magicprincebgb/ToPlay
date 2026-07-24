@@ -17,8 +17,11 @@ All notable changes to **ToPlay** are documented here. This project follows
 - New **ToPlay brand app/PWA icons** drawn directly at build time (no source
   image needed); replaces the old generic placeholder that showed as a plain
   letter on the Home Screen.
-- Documentation: clearer certificate‑trust steps for iPhone (Safari) so the
-  padlock goes clean and "Add to Home Screen" is unlocked.
+- Documentation: README now covers the **on‑screen keyboard** (Keys button),
+  the **live latency/ping readout**, the **PC sound** toggle, and clearer
+  certificate‑trust steps for iPhone (Safari) so the padlock goes clean and
+  "Add to Home Screen" is unlocked.
+
 
 ### Fixed
 - **Enabling audio mid‑session no longer breaks the stream.** A teardown/reconnect
