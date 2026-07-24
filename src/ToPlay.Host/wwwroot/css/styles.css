@@ -236,6 +236,25 @@ select {
 }
 .pill.show { opacity: 1; }
 
+/* One-tap prompt shown only when the browser blocks PC-sound autoplay (iOS). */
+#sound-nudge {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 44px);
+  transform: translateX(-50%);
+  z-index: 8;
+  background: rgba(31, 111, 235, .95);
+  border: 1px solid var(--border);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .4);
+}
+#sound-nudge.hidden { display: none; }
+
+
 /* Portrait-only hint: the PC screen is 16:9, so on a portrait phone it can
    only occupy a horizontal band (letterbox). Rotating to landscape lets the
    video fill the display. Pure CSS — no JS needed. */
@@ -264,7 +283,62 @@ select {
 #overlay:not(.hidden) ~ #rotate,
 #settings:not(.hidden) ~ #rotate { display: none; }
 
+/* ---------- Latency indicator ---------- */
+/* Sits in the top-right letterbox bar, clear of the game view. */
+#ping {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 6px);
+  right: calc(env(safe-area-inset-right, 0px) + 6px);
+  z-index: 6;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--muted);
+  background: rgba(19, 26, 38, .7);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 9px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .3s, color .3s;
+}
+#ping.show { opacity: 1; }
+#ping.ping-good { color: var(--ok); }
+#ping.ping-ok   { color: #d0a215; }
+#ping.ping-bad  { color: var(--danger); }
+/* Hide the readout on the connect / settings screens. */
+#overlay:not(.hidden) ~ #ping,
+#settings:not(.hidden) ~ #ping { display: none; }
+
+/* ---------- On-screen keyboard bar ---------- */
+#kbd {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  width: min(560px, calc(100vw - 24px));
+  z-index: 40;   /* above the HUD, below the settings modal */
+  background: rgba(11, 15, 23, .92);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+}
+#kbd.hidden { display: none; }
+#kbd #kbd-input {
+  flex: 1;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0d131e;
+  color: var(--text);
+  font-size: 16px;   /* 16px avoids iOS auto-zoom on focus */
+}
+#kbd #kbd-done { flex: 0 0 auto; }
+
 /* ---------- PWA install help ---------- */
+
 
 .install-mask {
   position: fixed;

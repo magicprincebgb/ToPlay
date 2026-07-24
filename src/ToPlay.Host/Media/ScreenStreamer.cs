@@ -191,10 +191,30 @@ public sealed class ScreenStreamer : IDisposable
                     int nalType = pending[scLen] & 0x1F;
                     bool isVcl = nalType is >= 1 and <= 5;
                     bool isAud = nalType == 9;
+                    bool isParamSet = nalType is 7 or 8; // SPS / PPS
 
-                    // Decide if this NAL starts a new access unit.
-                    if ((isAud && au.Count > 0) || (isVcl && auHasVcl))
-                        EmitAu(keyframe: au.Count > 0 && ContainsKeyframe(au));
+                    // A single video frame may be split into several slice NALs
+                    // (libx264's "-tune zerolatency" enables sliced-threads, so a
+                    // 720p frame on a 6-core CPU arrives as many VCL slices). All
+                    // slices of one picture MUST be delivered as ONE access unit;
+                    // splitting them makes the decoder paint partial frames, which
+                    // shows up on the phone as green/glitchy blocks. The first
+                    // slice of a picture has first_mb_in_slice == 0, encoded as a
+                    // leading '1' bit (MSB set) in the first slice-header byte (the
+                    // byte immediately after the 1-byte NAL header); continuation
+                    // slices have first_mb_in_slice > 0 and stay in the same AU.
+                    bool firstSliceOfPicture = isVcl
+                        && next > scLen + 1
+                        && (pending[scLen + 1] & 0x80) != 0;
+
+                    // A new access unit begins at an access-unit delimiter, at the
+                    // first slice of a new picture, or at a parameter set that
+                    // follows earlier picture data (a keyframe's SPS/PPS).
+                    bool startsNewAu = auHasVcl &&
+                        (isAud || firstSliceOfPicture || isParamSet);
+
+                    if (startsNewAu)
+                        EmitAu(keyframe: ContainsKeyframe(au));
 
                     // Append this NAL (with its start code) to the current AU.
                     for (int k = 0; k < next; k++) au.Add(pending[k]);

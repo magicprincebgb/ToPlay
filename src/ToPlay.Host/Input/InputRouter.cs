@@ -63,6 +63,20 @@ public sealed class InputRouter
                 KeyboardInjector.Send(key);
                 return;
 
+            case "txt":
+                // A run of text typed on the phone's on-screen keyboard: inject
+                // it verbatim (Unicode) into the focused control on the PC.
+                var s = ev.TryGetProperty("s", out var sEl) ? sEl.GetString() : null;
+                KeyboardInjector.Type(s);
+                return;
+
+            case "key":
+                // A control key from the on-screen keyboard (backspace / enter / tab).
+                var ctrl = ev.TryGetProperty("k", out var ckEl) ? ckEl.GetString() : null;
+                KeyboardInjector.Send(ctrl);
+                return;
+
+
             case "d":
             case "m":
             case "u":

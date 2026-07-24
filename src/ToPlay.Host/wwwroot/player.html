@@ -21,14 +21,38 @@
     <video id="video" playsinline autoplay muted></video>
   </div>
 
+  <!-- PC audio plays through its OWN element (not the video, which stays muted
+       so autoplay is reliable). Kept out of #stage so touches never hit it. -->
+  <audio id="pcaudio" autoplay playsinline></audio>
+
+
   <div id="hud">
     <button id="btn-back" title="Tap: Back (Esc) · Hold: close window (Alt+F4)">Back</button>
+    <button id="btn-kbd" title="Show keyboard">Keys</button>
     <button id="btn-settings">Settings</button>
     <button id="btn-quit" class="secondary">Quit</button>
   </div>
 
+  <!-- Latency readout, tucked in the top-right letterbox bar. -->
+  <div id="ping" title="Round-trip latency to your PC">–</div>
+
+  <!-- On-screen keyboard bar. Focusing the hidden input pops the phone's
+       keyboard; everything typed is streamed to the PC's focused field. -->
+  <div id="kbd" class="hidden">
+    <input id="kbd-input" type="text" autocomplete="off" autocapitalize="off"
+           autocorrect="off" spellcheck="false" enterkeyhint="enter"
+           placeholder="Type here — sent to your PC" />
+    <button id="kbd-done" class="secondary">Done</button>
+  </div>
+
 
   <div id="pill" class="pill"></div>
+
+  <!-- Shown only if the browser blocks audio autoplay (iOS): one tap starts
+       PC sound. Hidden the moment audio is playing. -->
+  <button id="sound-nudge" class="hidden">&#128266; Tap to enable PC sound</button>
+
+
 
   <div id="overlay">
 
@@ -57,11 +81,18 @@
         <option value="Software">Software (x264)</option>
       </select>
 
+      <label for="audio">PC sound</label>
+      <select id="audio">
+        <option value="off">Off (video only)</option>
+        <option value="on">On (hear your PC's audio)</option>
+      </select>
+
       <label for="fit">Screen fit</label>
       <select id="fit">
         <option value="contain">Fit whole screen (letterbox)</option>
         <option value="fill">Stretch to fill</option>
       </select>
+
 
       <label for="edge">Edge margin (reach the taskbar &amp; top buttons)</label>
       <select id="edge">

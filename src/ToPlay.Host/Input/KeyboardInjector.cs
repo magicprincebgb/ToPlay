@@ -36,12 +36,55 @@ public static class KeyboardInjector
                 Combo(VK_MENU, VK_F4); // Alt+F4
                 break;
 
+            case "backspace":
+            case "back-space":
+                Tap(VK_BACK);
+                break;
+
+            case "enter":
+            case "return":
+                Tap(VK_RETURN);
+                break;
+
+            case "tab":
+                Tap(VK_TAB);
+                break;
+
             default:
                 // Unknown key name: ignore rather than injecting something surprising.
                 Console.WriteLine($"[key] Ignoring unknown key '{key}'.");
                 break;
         }
     }
+
+    /// <summary>
+    /// Types arbitrary text into whatever control is focused on the PC. Each
+    /// character is injected as a Unicode key event (<c>KEYEVENTF_UNICODE</c>),
+    /// so it works regardless of the active keyboard layout and covers letters,
+    /// digits, punctuation and emoji from the phone's on-screen keyboard.
+    /// </summary>
+    public static void Type(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        var inputs = new List<INPUT>(text.Length * 2);
+        foreach (var ch in text)
+        {
+            // Translate the phone keyboard's newline into a real Enter press so
+            // multi-line inputs / "send" behaviours work as expected.
+            if (ch == '\n' || ch == '\r')
+            {
+                inputs.Add(KeyInput(VK_RETURN, keyUp: false));
+                inputs.Add(KeyInput(VK_RETURN, keyUp: true));
+                continue;
+            }
+
+            inputs.Add(UnicodeInput(ch, keyUp: false));
+            inputs.Add(UnicodeInput(ch, keyUp: true));
+        }
+        if (inputs.Count > 0) SendAll(inputs.ToArray());
+    }
+
 
     /// <summary>Press then release a single virtual key.</summary>
     private static void Tap(ushort vk)
@@ -90,14 +133,36 @@ public static class KeyboardInjector
         }
     };
 
+    /// <summary>A Unicode character key event (wVk=0, char in wScan + UNICODE flag).</summary>
+    private static INPUT UnicodeInput(char ch, bool keyUp) => new()
+    {
+        type = INPUT_KEYBOARD,
+        U = new InputUnion
+        {
+            ki = new KEYBDINPUT
+            {
+                wVk = 0,
+                wScan = ch,
+                dwFlags = KEYEVENTF_UNICODE | (keyUp ? KEYEVENTF_KEYUP : 0),
+                time = 0,
+                dwExtraInfo = IntPtr.Zero
+            }
+        }
+    };
+
     // ---- constants ---------------------------------------------------------
 
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint KEYEVENTF_UNICODE = 0x0004;
 
     private const ushort VK_ESCAPE = 0x1B;
     private const ushort VK_MENU   = 0x12; // ALT
     private const ushort VK_F4     = 0x73;
+    private const ushort VK_BACK   = 0x08; // Backspace
+    private const ushort VK_RETURN = 0x0D; // Enter
+    private const ushort VK_TAB    = 0x09;
+
 
     // ---- P/Invoke ----------------------------------------------------------
 

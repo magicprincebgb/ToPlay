@@ -22,10 +22,26 @@ rem  (the target PC will then download ffmpeg during install instead).
 rem ===========================================================================
 
 
-rem --- locate the .NET 8 SDK (per-user install preferred) --------------------
-set "DOTNET=%USERPROFILE%\.dotnet\dotnet.exe"
-if not exist "%DOTNET%" set "DOTNET=dotnet"
-if /I not "%DOTNET%"=="dotnet" set "DOTNET_ROOT=%USERPROFILE%\.dotnet"
+rem --- locate the .NET 8 SDK (per-user installs preferred) -------------------
+rem  Check both common per-user install dirs: the dotnet-install.ps1 default
+rem  (%USERPROFILE%\.dotnet) and the winget / manual LocalAppData location
+rem  (%LOCALAPPDATA%\Microsoft\dotnet). Fall back to whatever "dotnet" is on PATH.
+set "DOTNET="
+if exist "%USERPROFILE%\.dotnet\dotnet.exe" (
+  set "DOTNET=%USERPROFILE%\.dotnet\dotnet.exe"
+  set "DOTNET_ROOT=%USERPROFILE%\.dotnet"
+) else if exist "%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe" (
+  set "DOTNET=%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe"
+  set "DOTNET_ROOT=%LOCALAPPDATA%\Microsoft\dotnet"
+) else (
+  set "DOTNET=dotnet"
+)
+
+rem  Disable the reusable build/compiler server processes. When the SDK lives in
+rem  a non-standard per-user location, spawning those helper processes can fail
+rem  with "The system cannot find the path specified"; running in-process is
+rem  a touch slower but always works.
+set "NOSRV=--disable-build-servers"
 
 set "ROOT=%~dp0.."
 pushd "%ROOT%" || (echo Could not enter repo root & exit /b 1)
@@ -61,11 +77,11 @@ if exist "%FFMPEG%" (
 )
 
 echo [3/6] Publishing ToPlay.Host (self-contained)...
-"%DOTNET%" publish "src\ToPlay.Host\ToPlay.Host.csproj" -c Release -r %RID% --self-contained true -o "%APPDIR%" --nologo
+"%DOTNET%" publish "src\ToPlay.Host\ToPlay.Host.csproj" -c Release -r %RID% %NOSRV% --self-contained true -o "%APPDIR%" --nologo
 if errorlevel 1 goto :fail
 
 echo [4/6] Publishing ToPlay.App -> ToPlay.exe (self-contained)...
-"%DOTNET%" publish "src\ToPlay.App\ToPlay.App.csproj" -c Release -r %RID% --self-contained true -o "%APPDIR%" --nologo
+"%DOTNET%" publish "src\ToPlay.App\ToPlay.App.csproj" -c Release -r %RID% %NOSRV% --self-contained true -o "%APPDIR%" --nologo
 if errorlevel 1 goto :fail
 
 rem ship the icon file too, so Start Menu / Desktop shortcuts can point at it
@@ -84,7 +100,7 @@ if errorlevel 1 goto :fail
 if not exist "%PAYLOAD%\app.zip" (echo Payload zip was not created. & goto :fail)
 
 echo [6/6] Publishing installer -> ToPlaySetup.exe (single-file)...
-"%DOTNET%" publish "src\ToPlay.Installer\ToPlay.Installer.csproj" -c Release -r %RID% ^
+"%DOTNET%" publish "src\ToPlay.Installer\ToPlay.Installer.csproj" -c Release -r %RID% %NOSRV% ^
   --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true ^
   -o "%DIST%" --nologo
 if errorlevel 1 goto :fail

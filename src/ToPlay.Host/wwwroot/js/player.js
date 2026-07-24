@@ -13,6 +13,12 @@ const overlay  = document.getElementById('overlay');
 const ovStatus = document.getElementById('ov-status');
 const btnConn  = document.getElementById('btn-connect');
 const pill     = document.getElementById('pill');
+const pingEl   = document.getElementById('ping');
+const kbd      = document.getElementById('kbd');
+const kbdInput = document.getElementById('kbd-input');
+const pcaudio  = document.getElementById('pcaudio');
+const soundNudge = document.getElementById('sound-nudge');
+
 
 let pc = null;
 let ws = null;
@@ -20,6 +26,10 @@ let dc = null;
 let started = false;
 let userQuit = false;
 let reconnectTimer = null;
+let pingTimer = null;
+let kbdLastValue = '';
+let gotVideo = false;
+
 let fitMode = localStorage.getItem('toplay_fit') || 'contain';
 video.style.objectFit = fitMode;
 
@@ -29,6 +39,12 @@ video.style.objectFit = fitMode;
 let edgeMargin = localStorage.getItem('toplay_edge') || '4';
 
 document.documentElement.style.setProperty('--edge-margin', edgeMargin + 'px');
+
+// PC->phone audio is opt-in and OFF by default: the default experience stays
+// exactly as before (video only). When ON, the offer carries an audio
+// transceiver so the host adds an Opus track.
+let audioEnabled = localStorage.getItem('toplay_audio') === 'on';
+
 
 
 // ---------------------------------------------------------------- status UI
@@ -51,6 +67,15 @@ function showHud() {
   clearTimeout(hudTimer);
   hudTimer = setTimeout(() => { if (started) document.body.classList.add('hud-hidden'); }, 4000);
 }
+
+// PC-sound autoplay may be blocked until the user taps (iOS). Show a one-tap
+// prompt only in that case; hide it as soon as audio is actually playing.
+function showSoundNudge() { if (audioEnabled) soundNudge.classList.remove('hidden'); }
+function hideSoundNudge() { soundNudge.classList.add('hidden'); }
+soundNudge.addEventListener('click', () => {
+  pcaudio.play().then(hideSoundNudge).catch(() => {});
+});
+
 
 
 // ---------------------------------------------------------------- connection
@@ -78,23 +103,42 @@ async function start() {
 }
 
 async function negotiate() {
+  gotVideo = false;
   pc = new RTCPeerConnection({ iceServers: [] });
 
   // Reliable, ordered channel for touch input.
   dc = pc.createDataChannel('input', { ordered: true });
-  dc.onopen = () => flash('Input connected');
+  dc.onopen = () => { flash('Input connected'); startPing(); };
+  dc.onclose = () => stopPing();
+  dc.onmessage = onDataChannelMessage;
+
 
   pc.addTransceiver('video', { direction: 'recvonly' });
 
+  // Only ask for audio when the user turned "PC sound" on. When off we send no
+  // m=audio line, so the host stays video-only and nothing changes.
+  if (audioEnabled) pc.addTransceiver('audio', { direction: 'recvonly' });
+
   pc.ontrack = (e) => {
-    if (video.srcObject !== e.streams[0]) {
-      video.srcObject = e.streams[0];
-      video.play().catch(() => {});
+    if (e.track.kind === 'audio') {
+      // Route PC audio into its own (non-muted) element. The <video> stays
+      // muted so its autoplay never gets blocked; audio plays here instead.
+      let s = pcaudio.srcObject;
+      if (!(s instanceof MediaStream)) { s = new MediaStream(); pcaudio.srcObject = s; }
+      if (!s.getAudioTracks().includes(e.track)) s.addTrack(e.track);
+      pcaudio.play().then(hideSoundNudge).catch(showSoundNudge);
+    } else {
+      gotVideo = true;
+      if (video.srcObject !== e.streams[0]) {
+        video.srcObject = e.streams[0];
+        video.play().catch(() => {});
+      }
     }
     showOverlay(false);
     showHud();
     flash('Streaming');
   };
+
 
   pc.onicecandidate = (e) => {
     if (e.candidate && ws?.readyState === WebSocket.OPEN) {
@@ -123,7 +167,21 @@ async function onSignal(ev) {
   try { msg = JSON.parse(ev.data); } catch { return; }
 
   if (msg.type === 'answer') {
-    await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+    try {
+      await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+    } catch (err) {
+      // The browser rejected our SDP answer. When PC sound was requested, the
+      // added audio track is by far the likeliest cause — never leave the user
+      // stuck on a black screen (no video, no touch): permanently fall back to
+      // the rock-solid video-only path for this session and reconnect.
+      if (audioEnabled) {
+        audioEnabled = false;
+        localStorage.setItem('toplay_audio', 'off');
+        try { selAudio.value = 'off'; } catch {}
+        flash('PC sound not supported here — video only');
+      }
+      onDisconnected('Negotiation failed');
+    }
   } else if (msg.type === 'candidate' && msg.candidate) {
     try {
       await pc.addIceCandidate({
@@ -141,6 +199,15 @@ async function onSignal(ev) {
 
 function onDisconnected(reason) {
   if (userQuit) return;
+  // Safety net: if PC sound was on but we never got a working video stream,
+  // the audio negotiation is the likely culprit on this device. Permanently
+  // fall back to reliable video-only so the user is never stuck on black.
+  if (audioEnabled && !gotVideo) {
+    audioEnabled = false;
+    localStorage.setItem('toplay_audio', 'off');
+    try { selAudio.value = 'off'; } catch {}
+    flash('PC sound not supported here — video only');
+  }
   setStatus(reason + ' — reconnecting…');
   showOverlay(true);
   teardown();
@@ -150,11 +217,131 @@ function onDisconnected(reason) {
 
 function teardown() {
   started = false;
+  gotVideo = false;
+  stopPing();
+  closeKbd();
+  hideSoundNudge();
+  // Cancel any pending auto-reconnect so an INTENTIONAL bounce (toggling PC
+  // sound, applying settings, quitting) can never race with a second reconnect
+  // — that race used to reset gotVideo and spuriously trip the audio→video
+  // fallback, flipping PC sound back off when you re-enabled it mid-session.
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  try { pcaudio.pause(); pcaudio.srcObject = null; } catch {}
+  // Detach handlers BEFORE closing so this intentional teardown doesn't fire
+  // onDisconnected() (only a genuine, unexpected drop should reconnect).
+  if (pc) { try { pc.onconnectionstatechange = null; } catch {} }
+  if (ws) { try { ws.onclose = null; ws.onerror = null; ws.onmessage = null; } catch {} }
   try { dc && dc.close(); } catch {}
   try { pc && pc.close(); } catch {}
   try { ws && ws.close(); } catch {}
   dc = pc = ws = null;
 }
+
+
+// ---------------------------------------------------------------- latency HUD
+// Every second we bounce a tiny {t:'ping',ts} off the host; it echoes {t:'pong'}
+// with the same timestamp so we can show the real round-trip time. This is the
+// data-channel RTT — the same path touches take — so it reflects input lag.
+function startPing() {
+  stopPing();
+  pingEl.classList.add('show');
+  const tick = () => {
+    if (dc && dc.readyState === 'open') {
+      try { dc.send(JSON.stringify({ t: 'ping', ts: Date.now() })); } catch {}
+    }
+  };
+  tick();
+  pingTimer = setInterval(tick, 1000);
+}
+
+function stopPing() {
+  clearInterval(pingTimer);
+  pingTimer = null;
+  pingEl.classList.remove('show');
+  pingEl.textContent = '–';
+  pingEl.className = pingEl.className.replace(/\bping-(good|ok|bad)\b/g, '').trim();
+}
+
+function showPing(rtt) {
+  pingEl.textContent = rtt + ' ms';
+  const level = rtt < 60 ? 'ping-good' : rtt < 120 ? 'ping-ok' : 'ping-bad';
+  pingEl.classList.remove('ping-good', 'ping-ok', 'ping-bad');
+  pingEl.classList.add(level, 'show');
+}
+
+function onDataChannelMessage(ev) {
+  let msg;
+  try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
+  if (!msg || typeof msg !== 'object') return;
+
+  if (msg.t === 'pong' && typeof msg.ts === 'number') {
+    showPing(Math.max(0, Math.round(Date.now() - msg.ts)));
+  }
+}
+
+// ---------------------------------------------------------------- on-screen keyboard
+// The ⌨ (Keys) button focuses a hidden text field, which makes the phone's
+// native keyboard slide up. We stream keystrokes to the PC's focused control:
+//   • typed characters  → {t:'txt', s:'...'}   (Unicode injection host-side)
+//   • Enter / Backspace  → {t:'key', k:'enter'|'backspace'}
+// A common-prefix diff of the field's value handles autocorrect/replace too.
+function sendText(s) {
+  if (s && dc && dc.readyState === 'open') dc.send(JSON.stringify({ e: [{ t: 'txt', s }] }));
+}
+function sendCtrlKey(k) {
+  if (dc && dc.readyState === 'open') dc.send(JSON.stringify({ e: [{ t: 'key', k }] }));
+}
+
+function openKbd() {
+  if (!started) { flash('Connect first'); return; }
+  kbd.classList.remove('hidden');
+  kbdInput.value = '';
+  kbdLastValue = '';
+  // Focus must happen in the click handler for iOS to raise the keyboard.
+  kbdInput.focus();
+}
+
+function closeKbd() {
+  kbd.classList.add('hidden');
+  kbdInput.value = '';
+  kbdLastValue = '';
+  try { kbdInput.blur(); } catch {}
+}
+
+function onKbdInput() {
+  const cur = kbdInput.value;
+  const prev = kbdLastValue;
+
+  // Longest common prefix, then delete the rest of the old text and type the new.
+  let i = 0;
+  const min = Math.min(cur.length, prev.length);
+  while (i < min && cur[i] === prev[i]) i++;
+
+  const del = prev.length - i;
+  for (let k = 0; k < del; k++) sendCtrlKey('backspace');
+  const add = cur.slice(i);
+  if (add) sendText(add);
+
+  kbdLastValue = cur;
+}
+
+function onKbdKeydown(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendCtrlKey('enter');
+  } else if (e.key === 'Backspace' && kbdInput.value === '') {
+    // Field already empty — forward the backspace so it deletes on the PC.
+    e.preventDefault();
+    sendCtrlKey('backspace');
+  }
+}
+
+document.getElementById('btn-kbd').addEventListener('click', openKbd);
+document.getElementById('kbd-done').addEventListener('click', closeKbd);
+kbdInput.addEventListener('input', onKbdInput);
+kbdInput.addEventListener('keydown', onKbdKeydown);
+
 
 // ---------------------------------------------------------------- fullscreen
 async function requestFullscreen() {
@@ -263,9 +450,11 @@ const settings   = document.getElementById('settings');
 const selPreset  = document.getElementById('preset');
 const selMonitor = document.getElementById('monitor');
 const selEncoder = document.getElementById('encoder');
+const selAudio   = document.getElementById('audio');
 const selFit     = document.getElementById('fit');
 const selEdge    = document.getElementById('edge');
 const setStatusEl = document.getElementById('set-status');
+
 
 
 document.getElementById('btn-settings').addEventListener('click', openSettings);
@@ -286,6 +475,24 @@ selEdge.addEventListener('change', () => {
   localStorage.setItem('toplay_edge', edgeMargin);
 });
 
+// PC sound is negotiated in the SDP offer, so switching it requires a fresh
+// connection. We bounce the stream (same as an encoder change) so the new
+// setting takes effect immediately without the user reconnecting by hand.
+selAudio.value = audioEnabled ? 'on' : 'off';
+selAudio.addEventListener('change', () => {
+  audioEnabled = selAudio.value === 'on';
+  localStorage.setItem('toplay_audio', audioEnabled ? 'on' : 'off');
+  hideSoundNudge();
+  if (started) {
+    flash(audioEnabled ? 'PC sound on — reconnecting' : 'PC sound off — reconnecting');
+    teardown();
+    setTimeout(() => start(), 400);
+  } else {
+    flash(audioEnabled ? 'PC sound on' : 'PC sound off');
+  }
+});
+
+
 
 async function openSettings() {
   settings.classList.remove('hidden');
@@ -298,9 +505,11 @@ async function openSettings() {
   selMonitor.innerHTML = data.monitors.map(m => `<option value="${m.index}">${m.label}</option>`).join('');
   selMonitor.value = data.monitorIndex;
   selEncoder.value = data.encoder || 'Auto';
+  selAudio.value = audioEnabled ? 'on' : 'off';
   selFit.value = fitMode;
   selEdge.value = edgeMargin;
 }
+
 
 
 async function applySettings() {

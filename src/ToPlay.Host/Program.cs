@@ -81,12 +81,17 @@ app.Use(async (ctx, next) =>
 
     // 2) Keep tokens / video / touch input off cleartext: push off-box clients
     //    to HTTPS (loopback on the PC may stay on http for convenience).
-    if (config.UseHttps && !ctx.Request.IsHttps && !IsLocal(ctx))
+    //    Exception: the CA certificate download stays reachable over plain HTTP.
+    //    iOS/Safari won't complete an HTTPS download from a host it doesn't yet
+    //    trust — a chicken-and-egg — so this one file must be fetchable on http.
+    var isCaDownload = ctx.Request.Path.Equals("/toplay-ca.crt", StringComparison.OrdinalIgnoreCase);
+    if (config.UseHttps && !ctx.Request.IsHttps && !IsLocal(ctx) && !isCaDownload)
     {
         var target = $"https://{reqHost}:{config.HttpsPort}{ctx.Request.Path}{ctx.Request.QueryString}";
         ctx.Response.Redirect(target, permanent: false);
         return;
     }
+
 
     // 3) Hardening headers + strict CSP (matches our no-inline-script pages).
     var h = ctx.Response.Headers;

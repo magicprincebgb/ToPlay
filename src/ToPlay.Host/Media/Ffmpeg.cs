@@ -73,25 +73,106 @@ public static class Ffmpeg
         return found;
     }
 
+    // Caches probe results so we don't re-run the (slightly slow) encoder tests
+    // every time the user tweaks a setting. Results don't change within a run.
+    private static readonly Dictionary<string, bool> ProbeCache =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object ProbeGate = new();
+
+    /// <summary>
+    /// Verifies an encoder can actually be *initialized* on this machine, not
+    /// merely that it was compiled into ffmpeg. This matters because e.g.
+    /// h264_nvenc/h264_qsv/h264_amf are always listed by "-encoders" but fail at
+    /// runtime when the GPU/driver/runtime DLL is missing (Cannot load
+    /// nvcuda.dll, Error creating a MFX session, amfrt64.dll failed to open...),
+    /// which previously left the phone on a pitch-black screen with no fallback.
+    /// </summary>
+    public static bool IsEncoderUsable(string ffmpegPath, string codec)
+    {
+        lock (ProbeGate)
+            if (ProbeCache.TryGetValue(codec, out var cached))
+                return cached;
+
+        bool ok = ProbeEncoder(ffmpegPath, codec);
+        lock (ProbeGate) ProbeCache[codec] = ok;
+        Console.WriteLine($"[ffmpeg] encoder probe {codec}: {(ok ? "OK" : "unavailable")}");
+        return ok;
+    }
+
+    private static bool ProbeEncoder(string ffmpegPath, string codec)
+    {
+        try
+        {
+            // Encode a handful of tiny black frames from a synthetic source and
+            // throw the output away. Non-zero exit == this encoder can't run here.
+            string args = string.Join(' ',
+                "-hide_banner -loglevel error",
+                "-f lavfi -i color=c=black:s=256x144:r=15",
+                "-frames:v 5 -an",
+                $"-c:v {codec} -pix_fmt yuv420p",
+                "-f null -");
+
+            var psi = new ProcessStartInfo(ffmpegPath, args)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var p = Process.Start(psi)!;
+            var outTask = p.StandardOutput.ReadToEndAsync();
+            string err = p.StandardError.ReadToEnd();
+
+            if (!p.WaitForExit(10000))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                return false;
+            }
+            try { outTask.Wait(500); } catch { }
+
+            if (p.ExitCode != 0)
+            {
+                var firstLine = err.Split('\n')
+                    .FirstOrDefault(l => !string.IsNullOrWhiteSpace(l))?.Trim();
+                if (!string.IsNullOrEmpty(firstLine))
+                    Console.WriteLine($"[ffmpeg] {codec} probe failed: {firstLine}");
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ffmpeg] {codec} probe error: {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>
     /// Resolves the encoder codec to use given the user's preference and what is
-    /// actually available. Falls back down the chain.
+    /// actually usable on this machine. Probes each candidate so we never hand
+    /// back an encoder that opens to a black screen, and always ends at libx264
+    /// so ANY PC gets a picture without the user manually cycling encoders.
     /// </summary>
     public static (EncoderBackend backend, string codec) ResolveEncoder(
-        EncoderBackend preferred, HashSet<string> available)
+        EncoderBackend preferred, string ffmpegPath, HashSet<string> compiledIn)
     {
+        bool Usable(string codec) =>
+            compiledIn.Contains(codec) && IsEncoderUsable(ffmpegPath, codec);
+
         if (preferred != EncoderBackend.Auto)
         {
             var wanted = Order.First(o => o.backend == preferred);
-            if (available.Contains(wanted.codec)) return wanted;
-            Console.WriteLine($"[ffmpeg] Preferred encoder {wanted.codec} not available; auto-selecting.");
+            if (Usable(wanted.codec)) return wanted;
+            Console.WriteLine($"[ffmpeg] Preferred encoder {wanted.codec} is not usable on this PC; auto-selecting a working one.");
         }
 
         foreach (var o in Order)
-            if (available.Contains(o.codec))
+            if (Usable(o.codec))
                 return o;
 
         // libx264 should always be present in full builds; last resort anyway.
+        Console.WriteLine("[ffmpeg] No encoder passed probing; falling back to libx264.");
         return (EncoderBackend.Software, "libx264");
     }
 

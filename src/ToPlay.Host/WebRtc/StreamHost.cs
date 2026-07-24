@@ -26,8 +26,10 @@ public sealed class StreamHost : IDisposable
     private readonly InputRouter _inputRouter;
 
     private ScreenStreamer? _streamer;
+    private AudioStreamer? _audioStreamer;
     private string? _ffmpegPath;
     private StreamSession? _activeSession;
+
 
     public StreamHost(HostConfig config, string configPath)
     {
@@ -65,13 +67,20 @@ public sealed class StreamHost : IDisposable
         }
 
         var encoders = Ffmpeg.ListEncoders(_ffmpegPath);
-        var (_, codec) = Ffmpeg.ResolveEncoder(Config.Encoder, encoders);
+        var (_, codec) = Ffmpeg.ResolveEncoder(Config.Encoder, _ffmpegPath, encoders);
         ActiveCodec = codec;
 
         _streamer = new ScreenStreamer(_ffmpegPath, monitor, Config.ActivePreset, codec);
+
+        // Optional PC->phone audio pipeline. It's inert until a phone actually
+        // asks for sound (AddListener), so creating it here costs nothing when
+        // the toggle is OFF and never touches the audio hardware in that case.
+        _audioStreamer ??= new AudioStreamer();
+
         Ready = true;
         StatusMessage = $"Ready. Encoder: {codec}. Monitor: {monitor.Label}.";
         Console.WriteLine($"[host] {StatusMessage}");
+
     }
 
     /// <summary>True while a phone is connected (only one is allowed at a time).</summary>
@@ -99,7 +108,8 @@ public sealed class StreamHost : IDisposable
                 _activeSession = null;
             }
 
-            var session = new StreamSession(id, _streamer, _inputRouter);
+            var session = new StreamSession(id, _streamer, _inputRouter, _audioStreamer);
+
             session.Closed += () =>
             {
                 lock (_gate) { if (ReferenceEquals(_activeSession, session)) _activeSession = null; }
@@ -128,7 +138,7 @@ public sealed class StreamHost : IDisposable
             if (_ffmpegPath != null)
             {
                 var encoders = Ffmpeg.ListEncoders(_ffmpegPath);
-                var (_, codec) = Ffmpeg.ResolveEncoder(Config.Encoder, encoders);
+                var (_, codec) = Ffmpeg.ResolveEncoder(Config.Encoder, _ffmpegPath, encoders);
                 ActiveCodec = codec;
 
                 if (_streamer == null)
@@ -170,6 +180,8 @@ public sealed class StreamHost : IDisposable
             _activeSession = null;
         }
         _streamer?.Dispose();
+        _audioStreamer?.Dispose();
         _injector.Dispose();
     }
+
 }

@@ -34,8 +34,15 @@ echo [ToPlay] Building the control panel (ToPlay.exe)...
 "%DOTNET%" build "src\ToPlay.App\ToPlay.App.csproj" -c Release --nologo
 if errorlevel 1 (echo [ToPlay] Build failed. & popd & pause & exit /b 1)
 
-set "APPEXE=src\ToPlay.App\bin\Release\net8.0\ToPlay.exe"
-if not exist "%APPEXE%" (echo [ToPlay] Could not find %APPEXE% & popd & pause & exit /b 1)
+rem Locate the freshly built exe. The project targets net8.0-windows, so the
+rem output lands in bin\Release\net8.0-windows\ — but search for it rather than
+rem hard-coding the framework folder, so a future TFM bump can't break launch.
+rem NOTE: `for /r` with a literal (no-wildcard) name yields a phantom path for
+rem every subdir regardless of existence, so the `if exist` guard is required to
+rem pick the first file that actually exists.
+set "APPEXE="
+for /r "src\ToPlay.App\bin\Release" %%F in (ToPlay.exe) do if exist "%%F" if not defined APPEXE set "APPEXE=%%F"
+if not defined APPEXE (echo [ToPlay] Could not find ToPlay.exe under src\ToPlay.App\bin\Release & popd & pause & exit /b 1)
 
 echo [ToPlay] Opening the control panel...
 start "" "%APPEXE%"

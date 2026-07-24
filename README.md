@@ -6,8 +6,14 @@ Great for driving an Android emulator (MLBB, PUBG Mobile, …) that renders on t
 powerful PC while you touch‑control it from your phone.
 
 - **Video:** WebRTC H.264 straight to the phone's browser (no app to install).
+- **PC → phone audio (opt‑in):** hear your PC's sound — footsteps, gunshots,
+  music — right on the phone. Off by default; flip it on from the on‑screen
+  **Settings**. Paced for tight A/V sync so it stays in step with the video, and
+  if a browser can't negotiate audio it silently falls back to video‑only so the
+  stream never goes black.
 - **Input:** phone touches → Windows Touch Injection (real multi‑touch), plus a
   **Back** button that sends Esc / Alt+F4 to the PC.
+
 - **Accounts:** created **on the PC**, used to **log in from phones** on the LAN.
 - **Trusted HTTPS:** a tiny built‑in Certificate Authority makes the browser on
   the **PC** trust ToPlay automatically — no "Not secure" warning. Phones install
@@ -165,13 +171,15 @@ src/ToPlay.Host/          the streaming server (ToPlay.Host.exe)
   Media/                  ffmpeg locate/args + Annex‑B parser (ScreenStreamer)
   WebRtc/                 per‑viewer StreamSession + StreamHost coordinator
   Security/               self‑signed dev cert (LAN IP SANs)
-  wwwroot/                login / admin / player PWA (icons from logo.jpg)
+  wwwroot/                login / admin / player PWA (brand icons drawn by make-icons.ps1)
 src/ToPlay.App/           the GUI Control Panel shipped as ToPlay.exe
+
 src/ToPlay.Installer/     the self‑contained installer (ToPlaySetup.exe)
 scripts/
   build-installer.cmd     builds dist\ToPlaySetup.exe (the distributable)
-  make-icons.ps1          regenerates all icons from logo.jpg
+  make-icons.ps1          draws all app/PWA icons (GDI+) — no source image needed
   run.cmd                 dev: builds & runs ToPlay.exe from source (elevated)
+
   get-ffmpeg.ps1          downloads ffmpeg into the host tools folder
   allow-firewall.ps1      opens the LAN firewall + prints the phone URL
 ```

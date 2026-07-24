@@ -7,7 +7,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>ToPlay.Host</RootNamespace>
     <AssemblyName>ToPlay.Host</AssemblyName>
+    <Version>1.0.2</Version>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <FileVersion>1.0.2.0</FileVersion>
     <InvariantGlobalization>true</InvariantGlobalization>
+
     <!-- This host is Windows 10 (1507)+ only; touch injection & desktop
          duplication are Windows-specific. Suppress the platform-compat
          analyzer rather than pulling in Windows SDK projection packs. -->
@@ -18,7 +22,11 @@
     <PackageReference Include="SIPSorcery" Version="6.2.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <!-- PC->phone audio: WASAPI loopback capture (NAudio) + pure-C# Opus (Concentus). -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Concentus" Version="2.2.2" />
   </ItemGroup>
+
 
   <!-- Bundle a local ffmpeg.exe (dropped in ./tools by scripts/get-ffmpeg.ps1)
        into the build output so the host can find it at runtime. -->

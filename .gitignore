@@ -14,11 +14,14 @@ src/ToPlay.Installer/payload/
 /ToPlaySetup.exe
 /ffmpeg-*/
 
-# Internal notes kept out of the public repo (remove this line to publish it)
+# Internal / working notes kept out of the public repo (remove a line to publish it)
 /READMEinside.md
+/LAUNCH_POST.md
 
-
-
+# Reference-only third-party source (Sunshine) copied into the repo for study;
+# not part of ToPlay and must never be committed.
+Sunshine-master/
+/Sunshine-master/
 
 # Runtime data (accounts DB, config, generated TLS cert)
 **/data/
@@ -34,3 +37,14 @@ src/ToPlay.Host/tools/
 
 # Logs
 *.log
+*.tmp
+
+TestResults/
+
+# OS cruft
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+

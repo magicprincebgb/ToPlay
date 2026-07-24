@@ -9,7 +9,11 @@
     <!-- The shipped launcher is "ToPlay.exe". -->
     <AssemblyName>ToPlay</AssemblyName>
     <RootNamespace>ToPlay.App</RootNamespace>
+    <Version>1.0.2</Version>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <FileVersion>1.0.2.0</FileVersion>
     <ApplicationIcon>app.ico</ApplicationIcon>
+
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- Windows-only (WinForms + touch injection host). -->
