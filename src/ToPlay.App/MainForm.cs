@@ -9,7 +9,9 @@ using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Security.Principal;
+
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
@@ -69,7 +71,8 @@ public sealed class MainForm : Form
         _dotnet = FindDotnet();
 
         // ----- window chrome -----
-        Text = "ToPlay — Control Panel";
+        Text = $"ToPlay — Control Panel  {AppVersion()}";
+
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(760, 700);
         MinimumSize = new Size(660, 560);
@@ -90,7 +93,19 @@ public sealed class MainForm : Form
         };
         Controls.Add(title);
 
+        var version = new Label
+        {
+            Text = AppVersion(),
+            Font = new Font("Segoe UI", 9f),
+            ForeColor = Color.FromArgb(110, 130, 160),
+            AutoSize = true,
+            Anchor = AnchorStyles.Top | AnchorStyles.Right
+        };
+        Controls.Add(version);
+        version.Location = new Point(ClientSize.Width - version.PreferredWidth - 16, 24);
+
         _status.Text = "Stopped";
+
         _status.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
         _status.Location = new Point(120, 20);
         _status.AutoSize = true;
@@ -293,6 +308,14 @@ public sealed class MainForm : Form
         AutoSize = true,
         ForeColor = Color.FromArgb(138, 160, 192)
     };
+
+    /// <summary>Returns the app version formatted as "vMAJOR.MINOR.PATCH".</summary>
+    private static string AppVersion()
+    {
+        var v = Assembly.GetExecutingAssembly().GetName().Version;
+        return v is null ? "" : $"v{v.Major}.{v.Minor}.{v.Build}";
+    }
+
 
     // ======================= path / env resolution =======================
     private static (string exe, string? csproj) ResolveHost()

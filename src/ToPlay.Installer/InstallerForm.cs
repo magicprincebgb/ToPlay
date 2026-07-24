@@ -536,13 +536,16 @@ public sealed class InstallerForm : Form
             {
                 var exe = Path.Combine(installDir, "ToPlay.exe");
                 key.SetValue("DisplayName", "ToPlay");
-                key.SetValue("DisplayVersion", "1.0.0");
+                key.SetValue("DisplayVersion", "1.0.2");
                 key.SetValue("Publisher", "ToPlay");
                 key.SetValue("InstallLocation", installDir);
                 key.SetValue("DisplayIcon", exe);
-                key.SetValue("UninstallString", $"\"{uninstall}\"");
+                // Uninstall through the app's built-in dark-themed GUI. Keep the
+                // legacy uninstall.cmd on disk as a silent fallback.
+                key.SetValue("UninstallString", $"\"{exe}\" --uninstall");
                 key.SetValue("NoModify", 1, RegistryValueKind.DWord);
                 key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+
             }
             Log("Registered in Add/Remove Programs.");
         }
