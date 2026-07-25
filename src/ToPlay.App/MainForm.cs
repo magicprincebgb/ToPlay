@@ -54,6 +54,7 @@ public sealed class MainForm : Form
     private readonly Button _btnCert;
     private readonly Button _btnBug;
     private readonly CheckBox _chkAutostart = new();
+    private readonly CheckBox _chkAutostartServer = new();
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly NotifyIcon _tray = new();
     private bool _trayHintShown;
@@ -81,8 +82,8 @@ public sealed class MainForm : Form
         Text = $"ToPlay — Control Panel  {AppVersion()}";
 
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(760, 740);
-        MinimumSize = new Size(660, 600);
+        ClientSize = new Size(760, 764);
+        MinimumSize = new Size(660, 624);
         BackColor = Color.FromArgb(11, 15, 23);
         ForeColor = Color.FromArgb(230, 237, 247);
         Font = new Font("Segoe UI", 9f);
@@ -224,17 +225,29 @@ public sealed class MainForm : Form
         _btnSetup.Click += async (_, _) => await FirstTimeSetupAsync();
         _btnAccounts.Click += (_, _) => OpenAccounts();
 
-        // second row: auto-start + certificate + bug report
+        // second row: auto-start (+ sub-option) + certificate + bug report
         _chkAutostart.Text = "Start ToPlay when I sign in to Windows";
-        _chkAutostart.Location = new Point(18, 320);
+        _chkAutostart.Location = new Point(18, 316);
         _chkAutostart.AutoSize = true;
         _chkAutostart.ForeColor = Color.FromArgb(230, 237, 247);
         _chkAutostart.CheckedChanged += (_, _) =>
         {
-            if (_suppressAutostart) return;
-            SetAutostart(_chkAutostart.Checked);
+            if (!_suppressAutostart) SetAutostart(_chkAutostart.Checked);
+            _chkAutostartServer.Enabled = _chkAutostart.Checked;
         };
         Controls.Add(_chkAutostart);
+
+        // sub-option (indented): also bring the streaming server up at sign-in
+        _chkAutostartServer.Text = "Also start the streaming server automatically";
+        _chkAutostartServer.Location = new Point(38, 340);
+        _chkAutostartServer.AutoSize = true;
+        _chkAutostartServer.ForeColor = Color.FromArgb(138, 160, 192);
+        _chkAutostartServer.CheckedChanged += (_, _) =>
+        {
+            if (_suppressAutostart) return;
+            SetAutostartServer(_chkAutostartServer.Checked);
+        };
+        Controls.Add(_chkAutostartServer);
 
         _btnCert = MakeButton("Certificate", 470, 314, 130);
         _btnCert.Anchor = AnchorStyles.Top | AnchorStyles.Right;
@@ -248,7 +261,7 @@ public sealed class MainForm : Form
         var lblLog = new Label
         {
             Text = "Log",
-            Location = new Point(16, 352),
+            Location = new Point(16, 376),
             AutoSize = true,
             ForeColor = Color.FromArgb(138, 160, 192)
         };
@@ -258,8 +271,8 @@ public sealed class MainForm : Form
         _txtLog.ReadOnly = true;
         _txtLog.ScrollBars = ScrollBars.Vertical;
         _txtLog.WordWrap = false;
-        _txtLog.Location = new Point(16, 372);
-        _txtLog.Size = new Size(728, ClientSize.Height - 372 - 16);
+        _txtLog.Location = new Point(16, 396);
+        _txtLog.Size = new Size(728, ClientSize.Height - 396 - 16);
 
         _txtLog.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         _txtLog.BackColor = Color.FromArgb(6, 10, 16);
@@ -303,10 +316,19 @@ public sealed class MainForm : Form
 
             _suppressAutostart = true;
             _chkAutostart.Checked = IsAutostartEnabled();
+            _chkAutostartServer.Checked = ReadBool(ReadConfig(), "AutostartServer", true);
+            _chkAutostartServer.Enabled = _chkAutostart.Checked;
             _suppressAutostart = false;
 
             if (_startMinimized)
-                BeginInvoke(new Action(async () => { HideToTray(); await EnsureAndStartAsync(); }));
+            {
+                var startServer = ReadBool(ReadConfig(), "AutostartServer", true);
+                BeginInvoke(new Action(async () =>
+                {
+                    HideToTray();
+                    if (startServer) await EnsureAndStartAsync();
+                }));
+            }
         };
 
         FormClosing += MainForm_FormClosing;
@@ -813,6 +835,24 @@ public sealed class MainForm : Form
             var rc = RunForExitCode("schtasks", $"/delete /tn \"{AutostartTaskName}\" /f");
             Log(rc == 0 ? "Auto-start disabled." : "Auto-start was already off.");
         }
+    }
+
+    // Persists whether the streaming server should also start when ToPlay
+    // auto-launches at sign-in (a sub-option of "Start ToPlay when I sign in").
+    private void SetAutostartServer(bool enable)
+    {
+        var cfg = ReadConfig();
+        cfg["AutostartServer"] = enable;
+        try
+        {
+            Directory.CreateDirectory(_dataDir);
+            File.WriteAllText(_configPath,
+                cfg.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            Log(enable
+                ? "The streaming server will start automatically when ToPlay launches at sign-in."
+                : "Auto-start will open ToPlay only — the server won't start until you click \"Start server\".");
+        }
+        catch (Exception ex) { Log("Could not save the auto-start option: " + ex.Message); }
     }
 
     // ======================= certificate (trust like Sunshine) =======================
