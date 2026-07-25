@@ -10,6 +10,13 @@ namespace ToPlay.App;
 /// Shared palette + helpers for the "glassmorphism" look used across ToPlay's
 /// WinForms UI: a soft gradient background, translucent frosted cards, rounded
 /// accent buttons, and Windows 11 dark/rounded window chrome (best effort).
+///
+/// IMPORTANT: these controls deliberately do NOT use BackColor=Transparent.
+/// WinForms' simulated transparency composites translucent fills on top of
+/// stale buffer pixels whenever anchored controls move or repaint, producing
+/// smeared "ghost" copies of buttons. Instead every control opaquely repaints
+/// what sits visually behind it (form gradient + ancestor card fills) itself,
+/// which yields identical visuals with fully deterministic rendering.
 /// </summary>
 internal static class Glass
 {
@@ -59,6 +66,61 @@ internal static class Glass
         g.FillPath(pgb, glow);
     }
 
+    /// <summary>Paints the frosted translucent card fill + hairline border.</summary>
+    public static void PaintCardFill(Graphics g, Rectangle r, int radius)
+    {
+        if (r.Width <= 0 || r.Height <= 0) return;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using var path = Rounded(r, radius);
+
+        using (var fill = new LinearGradientBrush(r,
+                   Color.FromArgb(58, 255, 255, 255),
+                   Color.FromArgb(20, 255, 255, 255),
+                   LinearGradientMode.Vertical))
+            g.FillPath(fill, path);
+
+        using var border = new Pen(Color.FromArgb(72, 255, 255, 255));
+        g.DrawPath(border, path);
+    }
+
+    /// <summary>
+    /// Opaquely repaints everything that sits visually behind <paramref name="c"/>
+    /// (the form's gradient plus any ancestor <see cref="GlassCard"/> fills),
+    /// translated into c's coordinate space. This replaces WinForms' fragile
+    /// transparent-BackColor simulation, which leaves ghost images behind when
+    /// anchored controls move or translucent fills repaint over stale pixels.
+    /// </summary>
+    public static void PaintBehind(Control c, Graphics g)
+    {
+        var form = c.FindForm();
+        if (form == null || !form.IsHandleCreated || !c.IsHandleCreated)
+        {
+            g.Clear(GradBottom);
+            return;
+        }
+
+        // 1) the form's gradient backdrop, shifted so it lines up pixel-perfect
+        var inForm = form.PointToClient(c.PointToScreen(Point.Empty));
+        var state = g.Save();
+        g.TranslateTransform(-inForm.X, -inForm.Y);
+        PaintBackground(g, form.ClientRectangle);
+        g.Restore(state);
+
+        // 2) replay ancestor card fills (outermost first) so nesting composes
+        var cards = new System.Collections.Generic.List<GlassCard>();
+        for (var p = c.Parent; p is not null and not Form; p = p.Parent)
+            if (p is GlassCard card) cards.Add(card);
+        cards.Reverse();
+        foreach (var card in cards)
+        {
+            var cardInC = c.PointToClient(card.PointToScreen(Point.Empty));
+            state = g.Save();
+            g.TranslateTransform(cardInC.X, cardInC.Y);
+            PaintCardFill(g, new Rectangle(0, 0, card.Width - 1, card.Height - 1), card.Radius);
+            g.Restore(state);
+        }
+    }
+
     // ---- Windows 11 chrome (dark title bar + rounded corners), best effort ----
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
@@ -80,7 +142,8 @@ internal static class Glass
     }
 }
 
-/// <summary>A frosted, rounded, translucent panel. Children can be placed on it.</summary>
+/// <summary>A frosted, rounded panel. Children can be placed on it. Paints
+/// opaquely (backdrop + frosted fill) to avoid transparency ghosting.</summary>
 internal sealed class GlassCard : Panel
 {
     public int Radius { get; set; } = 16;
@@ -88,30 +151,19 @@ internal sealed class GlassCard : Panel
     public GlassCard()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint
-               | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor
-               | ControlStyles.ResizeRedraw, true);
-        BackColor = Color.Transparent;
+               | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        BackColor = Glass.GradBottom;   // opaque fallback; real pixels painted below
     }
+
+    protected override void OnPaintBackground(PaintEventArgs e)
+        => Glass.PaintBehind(this, e.Graphics);
 
     protected override void OnPaint(PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        var r = new Rectangle(0, 0, Width - 1, Height - 1);
-        using var path = Glass.Rounded(r, Radius);
-
-        using (var fill = new LinearGradientBrush(r,
-                   Color.FromArgb(58, 255, 255, 255),
-                   Color.FromArgb(20, 255, 255, 255),
-                   LinearGradientMode.Vertical))
-            g.FillPath(fill, path);
-
-        using (var border = new Pen(Color.FromArgb(72, 255, 255, 255)))
-            g.DrawPath(border, path);
-    }
+        => Glass.PaintCardFill(e.Graphics, new Rectangle(0, 0, Width - 1, Height - 1), Radius);
 }
 
-/// <summary>A rounded, custom-drawn button with hover/press states and an optional accent style.</summary>
+/// <summary>A rounded, custom-drawn button with hover/press states and an
+/// optional accent style. Paints opaquely to avoid transparency ghosting.</summary>
 internal sealed class GlassButton : Button
 {
     public int Radius { get; set; } = 9;
@@ -123,9 +175,8 @@ internal sealed class GlassButton : Button
     public GlassButton()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint
-               | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor
-               | ControlStyles.ResizeRedraw, true);
-        BackColor = Color.Transparent;
+               | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        BackColor = Glass.GradBottom;   // opaque fallback; real pixels painted below
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
         Cursor = Cursors.Hand;
@@ -137,8 +188,14 @@ internal sealed class GlassButton : Button
     protected override void OnMouseDown(MouseEventArgs e) { _down = true; Invalidate(); base.OnMouseDown(e); }
     protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
 
+    protected override void OnPaintBackground(PaintEventArgs e)
+        => Glass.PaintBehind(this, e.Graphics);
+
     protected override void OnPaint(PaintEventArgs e)
     {
+        // backdrop first (OnPaintBackground is not always invoked for buttons)
+        Glass.PaintBehind(this, e.Graphics);
+
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var r = new Rectangle(0, 0, Width - 1, Height - 1);

@@ -54,6 +54,11 @@ existing installs — settings, accounts and certificates carry over.
   including a clear message when the last admin can't be removed.
 - The sign-in button shows **"Signing in…"** while the request is in flight.
 - The sign-in page shows the app version.
+- **Fixed the Control Panel rendering glitch** where buttons and checkboxes
+  left overlapping "ghost" copies of themselves (the glass controls now paint
+  opaquely instead of relying on WinForms' fragile simulated transparency).
+- The version shown in **Add/Remove Programs** is now derived from the
+  installer itself and can no longer go stale.
 
 ### Notes
 - Windows SmartScreen may warn on the new unsigned `ToPlaySetup.exe` — choose

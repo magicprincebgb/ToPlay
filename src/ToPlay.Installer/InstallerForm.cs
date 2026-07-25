@@ -536,7 +536,9 @@ public sealed class InstallerForm : Form
             {
                 var exe = Path.Combine(installDir, "ToPlay.exe");
                 key.SetValue("DisplayName", "ToPlay");
-                key.SetValue("DisplayVersion", "1.0.2");
+                // Derived from the assembly version so it can never go stale.
+                key.SetValue("DisplayVersion",
+                    System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "2.0.0");
                 key.SetValue("Publisher", "ToPlay");
                 key.SetValue("InstallLocation", installDir);
                 key.SetValue("DisplayIcon", exe);
