@@ -154,6 +154,8 @@ public sealed class UninstallForm : Form
 
         // 2) Remove the LAN firewall rules.
         Log("Removing firewall rules…");
+        foreach (var proto in new[] { "UDP", "TCP" })
+            RunHidden("netsh", $"advfirewall firewall delete rule name=\"ToPlay stream ({proto})\"");
         foreach (var port in new[] { 8080, 8443 })
             RunHidden("netsh", $"advfirewall firewall delete rule name=\"ToPlay ({port})\"");
 

@@ -73,6 +73,32 @@ foreach ($port in $ports) {
     Write-Host "Opened inbound TCP $port." -ForegroundColor Green
 }
 
+# --- allow the stream itself (UDP on random ports) -------------------------
+# The web pages travel over TCP, but video, sound and touches travel over UDP
+# on ports Windows picks at random, so a port rule can never cover them. A rule
+# for the host program does — and it must apply to "Public" too, because that is
+# what a phone's hotspot always looks like to Windows.
+$hostExe = @(
+    (Join-Path $PSScriptRoot '..\src\ToPlay.Host\bin\Release\net8.0\ToPlay.Host.exe'),
+    (Join-Path $PSScriptRoot '..\src\ToPlay.Host\bin\Debug\net8.0\ToPlay.Host.exe'),
+    'C:\Program Files\ToPlay\ToPlay.Host.exe'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($hostExe) {
+    $hostExe = (Resolve-Path $hostExe).Path
+    foreach ($proto in 'UDP', 'TCP') {
+        $name = "ToPlay stream ($proto)"
+        Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue |
+            Remove-NetFirewallRule -ErrorAction SilentlyContinue
+        New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Allow `
+            -Protocol $proto -Program $hostExe -Profile Private, Domain, Public | Out-Null
+    }
+    Write-Host "Allowed the ToPlay stream (UDP + TCP) for $hostExe." -ForegroundColor Green
+}
+else {
+    Write-Warning "ToPlay.Host.exe not found - build the host (or install ToPlay), then re-run this script."
+}
+
 # --- tell the user the correct URL -----------------------------------------
 # Prefer the adapter that actually has a default gateway (the real LAN NIC),
 # skipping Hyper-V / VirtualBox / VMware virtual adapters.

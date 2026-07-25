@@ -3,7 +3,36 @@
 All notable changes to **ToPlay** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.1] — 2026-07-25
+
+**Play anywhere, including on your phone's hotspot.** A small but important
+fix for anyone who streams away from their home Wi-Fi. Drop-in upgrade;
+accounts and settings carry over.
+
+### Fixed — the stream now gets through on "Public" networks
+- **On some networks the ToPlay page opened on the phone, the PC accepted the
+  connection, and then nothing ever appeared** — the phone just kept trying
+  again and again. Phone hotspots are the usual case, because Windows treats
+  them as a *public* network and blocks far more than it does on your home
+  Wi-Fi.
+- **The cause:** ToPlay only asked Windows Firewall to let in the two doors the
+  web page uses. The picture and sound themselves travel a different way, on
+  ports Windows picks fresh every time, so there was no way to open them by
+  number in advance. On a home network Windows let them through anyway; on a
+  public network it silently dropped them, and the phone was left waiting for a
+  picture that could never arrive.
+- **The fix:** ToPlay now asks Windows to trust the streaming program itself
+  rather than a list of port numbers, on every kind of network — home, work and
+  public. That covers the picture, the sound and your touches, whatever ports
+  they end up using.
+- This happens automatically during install, and you can also re-apply it any
+  time from the Control Panel with **First-time setup**. Uninstalling removes
+  the new permissions again, exactly like the old ones.
+
+---
+
 ## [2.1.0] — 2026-07-25
+
 
 **The competitive gaming release.** Nothing new to learn and nothing to
 reconfigure — ToPlay just responds faster. Every change below removes waiting

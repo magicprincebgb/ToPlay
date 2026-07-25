@@ -9,9 +9,9 @@
     <!-- The shipped launcher is "ToPlay.exe". -->
     <AssemblyName>ToPlay</AssemblyName>
     <RootNamespace>ToPlay.App</RootNamespace>
-    <Version>2.1.0</Version>
-    <AssemblyVersion>2.1.0.0</AssemblyVersion>
-    <FileVersion>2.1.0.0</FileVersion>
+    <Version>2.1.1</Version>
+    <AssemblyVersion>2.1.1.0</AssemblyVersion>
+    <FileVersion>2.1.1.0</FileVersion>
 
     <ApplicationIcon>app.ico</ApplicationIcon>
 

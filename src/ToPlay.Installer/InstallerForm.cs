@@ -204,7 +204,7 @@ public sealed class InstallerForm : Form
                 throw new FileNotFoundException("ToPlay.exe was not found after extraction.", _installedExe);
 
             if (ffmpeg) await EnsureFfmpegAsync(installDir);
-            if (firewall) await Task.Run(OpenFirewall);
+            if (firewall) await Task.Run(() => OpenFirewall(installDir));
 
             await Task.Run(() => CreateShortcuts(installDir, desktop));
             await Task.Run(() => WriteUninstaller(installDir));
@@ -439,8 +439,23 @@ public sealed class InstallerForm : Form
     }
 
 
-    private void OpenFirewall()
+    private void OpenFirewall(string installDir)
     {
+        // The web pages travel over TCP, but the stream itself — video, sound and
+        // every touch — travels over UDP on ports Windows picks at random, so a
+        // port rule can never cover it. And a phone hotspot always counts as a
+        // "Public" network, where Windows drops anything not explicitly allowed.
+        // Without the rule below the phone loads the page, gets an answer from
+        // the PC, and then just sits on a black screen reconnecting forever.
+        var hostExe = Path.Combine(installDir, "ToPlay.Host.exe");
+        foreach (var proto in new[] { "UDP", "TCP" })
+        {
+            var streamRule = $"ToPlay stream ({proto})";
+            RunHidden("netsh", $"advfirewall firewall delete rule name=\"{streamRule}\"");
+            RunHidden("netsh", $"advfirewall firewall add rule name=\"{streamRule}\" dir=in action=allow protocol={proto} program=\"{hostExe}\" profile=any enable=yes");
+        }
+        Log("  allowed the ToPlay stream (UDP + TCP, every network type).");
+
         int[] ports = { 8080, 8443 };
         Log("Configuring Windows Firewall for the LAN…");
 
@@ -522,6 +537,8 @@ public sealed class InstallerForm : Form
             sb.AppendLine("taskkill /IM ToPlay.exe /F >nul 2>&1");
             sb.AppendLine("taskkill /IM ToPlay.Host.exe /F >nul 2>&1");
             sb.AppendLine("timeout /t 1 /nobreak >nul");
+            sb.AppendLine("netsh advfirewall firewall delete rule name=\"ToPlay stream (UDP)\" >nul 2>&1");
+            sb.AppendLine("netsh advfirewall firewall delete rule name=\"ToPlay stream (TCP)\" >nul 2>&1");
             sb.AppendLine("netsh advfirewall firewall delete rule name=\"ToPlay (8080)\" >nul 2>&1");
             sb.AppendLine("netsh advfirewall firewall delete rule name=\"ToPlay (8443)\" >nul 2>&1");
             sb.AppendLine("reg delete \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ToPlay\" /f >nul 2>&1");

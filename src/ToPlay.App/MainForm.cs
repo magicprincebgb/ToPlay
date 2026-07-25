@@ -795,6 +795,21 @@ public sealed class MainForm : Form
     private void OpenFirewall()
     {
         if (!_isAdmin) { Log("Not elevated — cannot change the firewall. Re-launch as Administrator."); return; }
+
+        // Opening 8080/8443 only lets the phone load the page. The stream itself
+        // (video, sound, touches) is UDP on ports Windows picks at random, and a
+        // phone hotspot always counts as a "Public" network where Windows blocks
+        // everything not explicitly allowed — which showed up as a black screen
+        // that reconnected forever. Allow the host program on every network type.
+        var hostExe = Path.Combine(AppContext.BaseDirectory, "ToPlay.Host.exe");
+        foreach (var proto in new[] { "UDP", "TCP" })
+        {
+            var streamRule = $"ToPlay stream ({proto})";
+            RunHidden("netsh", $"advfirewall firewall delete rule name=\"{streamRule}\"");
+            RunHidden("netsh", $"advfirewall firewall add rule name=\"{streamRule}\" dir=in action=allow protocol={proto} program=\"{hostExe}\" profile=any enable=yes");
+        }
+        Log("Allowed the ToPlay stream (UDP + TCP, every network type).");
+
         var cfg = ReadConfig();
         int[] ports = { ReadInt(cfg, "HttpPort", 8080), ReadInt(cfg, "HttpsPort", 8443) };
 
