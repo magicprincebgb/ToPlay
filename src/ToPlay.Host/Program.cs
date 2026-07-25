@@ -137,8 +137,17 @@ app.UseStaticFiles(new StaticFileOptions
     ContentTypeProvider = contentTypes,
     // Let phones cache CSS/JS/icons briefly instead of re-fetching every page
     // load; short max-age so app updates still roll out within minutes.
+    // Pages and the web-app manifest are always re-checked, because a cached
+    // page keeps pointing at whatever icons/scripts it was built with — that is
+    // how a phone ends up showing yesterday's app icon after an update.
     OnPrepareResponse = static resp =>
-        resp.Context.Response.Headers.CacheControl = "public,max-age=300"
+    {
+        var name = resp.File.Name;
+        var alwaysFresh = name.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+                       || name.EndsWith(".webmanifest", StringComparison.OrdinalIgnoreCase);
+        resp.Context.Response.Headers.CacheControl =
+            alwaysFresh ? "no-cache" : "public,max-age=300";
+    }
 });
 
 // ---- trusted-certificate download -----------------------------------------

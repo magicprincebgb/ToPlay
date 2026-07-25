@@ -186,6 +186,21 @@ th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border);
   background: rgba(19,26,38,.75);
   border: 1px solid var(--border);
 }
+/* "Sign out" really leaves the account on this phone, so it looks different
+   from the everyday "Quit" (which only stops the stream) — no one taps it by
+   mistake. Smaller and quieter, since it's rarely needed. */
+#hud button.signout {
+  background: rgba(10,14,22,.7);
+  border-color: #3a2530;
+  color: #d99a95;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+/* Short screens (a phone held in landscape) — keep all five buttons on screen. */
+@media (max-height: 420px) {
+  #hud { gap: 6px; }
+  #hud button { padding: 6px 10px; font-size: 12px; }
+}
 /* While playing the HUD auto-hides so its buttons never sit on top of the
    game's controls. Hidden = invisible AND click-through (taps reach the PC). */
 body.hud-hidden #hud { opacity: 0; pointer-events: none; }

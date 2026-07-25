@@ -144,7 +144,11 @@ can't self‑register.
    keyboard and types straight into whatever field is focused on the PC — and a
    small **latency (ping) readout** that turns green when input lag is low. The
    HUD auto‑hides while you play; tap the tiny **⋮ grip** at the top to bring it
-   back.
+   back. When you're done, **Quit** just stops the stream — you stay signed in on
+   that phone, so next time you only tap **"Tap to start"** and you're back in the
+   game. Use **Sign out** only if you want to leave the account on that phone; it
+   also forgets the remembered device, so it will ask for your username and
+   password again.
 
 
 

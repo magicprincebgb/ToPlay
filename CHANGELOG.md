@@ -3,6 +3,41 @@
 All notable changes to **ToPlay** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.1] — 2026-07-26
+
+**"Remember me" now actually keeps you signed in.** Quitting a game no longer
+signs you out of your phone, so you can jump back in and connect with a single
+tap. Drop-in upgrade; accounts and settings carry over.
+
+### Fixed — Quit no longer signs you out
+- **Tapping *Quit* now just stops the stream.** It closes the connection and
+  brings back the "Tap to start" screen — you stay signed in on that phone.
+  Come back to ToPlay later (even hours later) and you can connect straight
+  away, with no username and password.
+- Previously *Quit* signed you out completely, which asked for your password
+  every single time and made *Remember me* look like it wasn't working.
+
+### New — a proper "Sign out" button
+- The play screen's button strip now has its own **Sign out** button, next to
+  Quit. That's the one that really leaves your account on this phone: it asks
+  you to confirm, then forgets the device on the PC too, so the next visit
+  needs your username and password again.
+- Sign out is styled differently and sits at the end of the strip, so it can't
+  be mistaken for Quit mid-game. On short screens the whole strip shrinks
+  slightly so all five buttons stay reachable.
+
+### Fixed — the app icon was stuck on an old version
+- **The Accounts page (and every other page) now shows the current ToPlay
+  icon.** Phones and browsers were holding on to an icon they had cached from an
+  earlier version, so the browser tab and home-screen shortcut kept showing the
+  old artwork. Icons are now stamped with the version, and pages are always
+  re-checked for updates, so a new release shows its new icon right away.
+- The Accounts page was also missing a few icon sizes that iPhones and iPads
+  look for; it now has the full set like the rest of ToPlay.
+- Removed a leftover, unused image file from an earlier design.
+
+---
+
 ## [2.2.0] — 2026-07-26
 
 **No more typing your password every time you want to play.** Tick *Remember me*

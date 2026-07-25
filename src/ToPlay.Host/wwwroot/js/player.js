@@ -569,11 +569,28 @@ window.addEventListener('pagehide', () => sendEvents([{ t: 'c' }]));
 // ---------------------------------------------------------------- HUD + settings
 document.getElementById('grip').addEventListener('click', showHud);
 btnConn.addEventListener('click', () => { showOverlay(false); start(); });
+// Quit = stop streaming only. You stay signed in on this phone, so coming back
+// to ToPlay later connects straight away with no username/password. Signing out
+// is a separate, deliberate action (the "Sign out" button below).
 document.getElementById('btn-quit').addEventListener('click', () => {
   userQuit = true;
   teardown();
+  setStatus('Disconnected. Tap to start again.');
+  showOverlay(true);
+  showHud();
+});
+
+// Sign out = really leave this account on this phone (also forgets "Remember me"
+// on the PC, so the next visit asks for the username and password again).
+document.getElementById('btn-signout').addEventListener('click', () => {
+  if (!confirm('Sign out of ToPlay on this phone?\n\nYou will need your username and password to connect again.')) return;
+  userQuit = true;
+  teardown();
+  setStatus('Signing out…');
+  showOverlay(true);
   logout();
 });
+
 
 // Back button — controls whatever program is focused on the PC:
 //   • quick tap  → Escape (go back / close menus; also the Android "Back"
