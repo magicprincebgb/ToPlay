@@ -99,18 +99,27 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 if errorlevel 1 goto :fail
 if not exist "%PAYLOAD%\app.zip" (echo Payload zip was not created. & goto :fail)
 
-echo [6/6] Publishing installer -> ToPlaySetup.exe (single-file)...
+echo [6/6] Publishing installer to ToPlaySetup.exe (single-file)...
+
 "%DOTNET%" publish "src\ToPlay.Installer\ToPlay.Installer.csproj" -c Release -r %RID% %NOSRV% ^
   --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true ^
   -o "%DIST%" --nologo
 if errorlevel 1 goto :fail
 
+rem  Publish this next to the .exe on the GitHub release. ToPlay's built-in
+rem  "Check for updates" downloads it and refuses to install anything whose
+rem  SHA-256 does not match, byte for byte.
+echo   Writing SHA-256 checksum sidecar...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$h = (Get-FileHash -Algorithm SHA256 -Path (Join-Path '%DIST%' 'ToPlaySetup.exe')).Hash.ToLower(); Set-Content -Path (Join-Path '%DIST%' 'ToPlaySetup.exe.sha256') -Value $h -NoNewline -Encoding ascii; Write-Host ('   SHA-256: ' + $h)"
 
 echo(
 echo === DONE ===================================================================
 echo   Installer: %DIST%\ToPlaySetup.exe
+echo   Checksum : %DIST%\ToPlaySetup.exe.sha256  (upload with the release)
 echo   Share this single file; users double-click it to install ToPlay.
 echo ===========================================================================
+
 popd
 endlocal
 exit /b 0

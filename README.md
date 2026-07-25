@@ -69,6 +69,11 @@ does everything for you:
 - **Start / Stop / Restart** the streaming server.
 - **First‑time setup** — (re)fetch ffmpeg and open the firewall, if you skipped
   it during install.
+- **Check for updates** — asks GitHub whether a newer ToPlay exists. If one does,
+  you get the release notes and a **Download and install** button; ToPlay verifies
+  the download, upgrades in place (accounts and settings are kept) and reopens
+  itself. Nothing is contacted or downloaded unless you press the button.
+
 - A live **Log** view of the server output.
 - The exact **phone URL** (auto‑detected LAN IP) with **Copy** and **Open here**.
 - **Settings** — Quality preset, Encoder, Monitor and HTTP/HTTPS ports — saved to
@@ -331,6 +336,15 @@ locked down even though it only runs on your LAN:
   self‑register. You also can't delete the last admin account.
 - **Abuse limits.** Signaling messages are size‑capped (64 KB) and only one viewer
   is served at a time (a new connection takes over the old one).
+- **Updates are verified before they can run.** *Check for updates* only ever talks
+  to GitHub over HTTPS (a redirect off `github.com` /
+  `*.githubusercontent.com` is refused), and the downloaded installer must match the
+  release's published byte size **and** its official SHA‑256 checksum, carry a valid
+  Windows executable header, and be stamped with the version it claims to be —
+  otherwise the file is deleted and nothing is installed. Installing still goes
+  through the normal Windows administrator prompt, and ToPlay never checks in the
+  background or sends anything about you or your PC.
+
 
 ---
 

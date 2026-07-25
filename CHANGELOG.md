@@ -3,7 +3,45 @@
 All notable changes to **ToPlay** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.3.0] — 2026-07-26
+
+**ToPlay can now update itself.** There's a new **Check for updates** button in
+the Control Panel: press it and ToPlay looks for a newer release, shows you
+what's new, then downloads and installs it for you. Drop-in upgrade; accounts
+and settings carry over.
+
+### New — one-button updates
+- **Press *Check for updates* in the Control Panel** (bottom of the Controls
+  card) and ToPlay asks GitHub whether a newer version exists. If you're
+  already current it simply says *"You're up to date"* — nothing is downloaded
+  and nothing changes.
+- If there **is** a new version, a window opens with the version number, the
+  download size and the full release notes, so you can read what changed before
+  committing to anything. Nothing is installed until you press **Download and
+  install**; *Not now* leaves everything exactly as it is, and there's a **View
+  on GitHub** button if you'd rather do it by hand.
+- The download shows a live progress bar and can be cancelled at any time. When
+  it finishes, ToPlay stops the stream, hands over to the installer, and the new
+  version reopens on its own — usually about a minute end to end.
+- The update installs over your existing folder, so **your accounts, remembered
+  phones and settings all stay put**, and you don't get a second Desktop icon.
+- No background phoning home: ToPlay only contacts GitHub when *you* press the
+  button, and it never sends anything about you or your PC.
+
+### Security — updates are verified before they run
+- Every update is fetched over HTTPS from the official ToPlay releases on
+  GitHub, and nowhere else — a redirect to any other site is rejected outright.
+- Before it's allowed to run, the downloaded file has to pass every check: the
+  exact size published with the release, the official SHA-256 checksum, a valid
+  Windows program header, and a version stamp matching the release it claims to
+  be. If anything is off, the file is deleted and the update is refused.
+- Installing still asks for Windows' normal administrator permission, so an
+  update can never be applied silently behind your back.
+
+---
+
 ## [2.2.1] — 2026-07-26
+
 
 **"Remember me" now actually keeps you signed in.** Quitting a game no longer
 signs you out of your phone, so you can jump back in and connect with a single

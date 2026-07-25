@@ -55,6 +55,9 @@ public sealed class MainForm : Form
     private readonly Button _btnStart, _btnStop, _btnRestart, _btnRebuild, _btnSetup, _btnAccounts;
     private readonly Button _btnCert;
     private readonly Button _btnBug;
+    private readonly Button _btnUpdate;
+    private readonly Label _lblUpdate;
+    private bool _checkingUpdate;
     private readonly CheckBox _chkAutostart = new();
     private readonly CheckBox _chkAutostartServer = new();
     private readonly System.Windows.Forms.Timer _timer = new();
@@ -83,8 +86,8 @@ public sealed class MainForm : Form
         // ----- window chrome -----
         Text = $"ToPlay — Control Panel  {AppVersion()}";
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(780, 824);
-        MinimumSize = new Size(720, 680);
+        ClientSize = new Size(780, 866);
+        MinimumSize = new Size(720, 722);
         BackColor = Glass.GradBottom;
         ForeColor = Glass.Text;
         Font = new Font("Segoe UI", 9f);
@@ -211,7 +214,7 @@ public sealed class MainForm : Form
         btnSave.Click += (_, _) => SaveSettings();
 
         // ===== card: server controls + startup / actions =====
-        var cardControls = MakeCard(20, 370, 740, 134);
+        var cardControls = MakeCard(20, 370, 740, 176);
 
         _btnStart = MakeButton(cardControls, "Start server", 20, 16, 120, accent: true);
         _btnStop = MakeButton(cardControls, "Stop", 150, 16, 84);
@@ -256,11 +259,17 @@ public sealed class MainForm : Form
         _btnBug.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _btnBug.Click += (_, _) => { using var f = new BugReportForm(_txtLog.Text, AppVersion()); f.ShowDialog(this); };
 
+        // ---- updates: one button that checks, downloads and installs ----
+        _btnUpdate = MakeButton(cardControls, "Check for updates", 20, 126, 150);
+        _btnUpdate.Click += async (_, _) => await CheckForUpdatesAsync();
+
+        _lblUpdate = MakeLabel(cardControls, $"You're running {AppVersion()}.", 182, 135, muted: true);
+
         // ===== log =====
         var lblLog = new Label
         {
             Text = "Log",
-            Location = new Point(24, 516),
+            Location = new Point(24, 558),
             AutoSize = true,
             ForeColor = Glass.Muted,
             BackColor = Color.Transparent
@@ -271,8 +280,8 @@ public sealed class MainForm : Form
         _txtLog.ReadOnly = true;
         _txtLog.ScrollBars = ScrollBars.Vertical;
         _txtLog.WordWrap = false;
-        _txtLog.Location = new Point(20, 538);
-        _txtLog.Size = new Size(740, ClientSize.Height - 538 - 20);
+        _txtLog.Location = new Point(20, 580);
+        _txtLog.Size = new Size(740, ClientSize.Height - 580 - 20);
         _txtLog.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         _txtLog.BackColor = Color.FromArgb(8, 12, 20);
         _txtLog.ForeColor = Color.FromArgb(200, 214, 235);
@@ -964,6 +973,81 @@ public sealed class MainForm : Form
             "phone's browser once and install the certificate:\n\n" + caUrl +
             (savedTo != null ? "\n\nA copy was also saved to your Desktop (ToPlay-Certificate.crt)." : ""),
             "Certificate", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    // ======================= updates =======================
+    /// <summary>
+    /// The "Check for updates" button. Asks GitHub what the newest release is;
+    /// if there's a newer one, shows what changed and — if the user agrees —
+    /// downloads it, verifies it and hands it to the setup, which upgrades in
+    /// place (accounts, settings and the certificate are kept) and relaunches
+    /// ToPlay. Being already up to date is a normal, quiet outcome.
+    /// </summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_checkingUpdate) return;
+        _checkingUpdate = true;
+        _btnUpdate.Enabled = false;
+        _btnUpdate.Text = "Checking…";
+        _lblUpdate.ForeColor = Glass.Muted;
+        _lblUpdate.Text = "Looking for a newer version…";
+        Log("Checking for updates…");
+
+        try
+        {
+            var info = await UpdateService.CheckAsync();
+
+            if (info is null)
+            {
+                _lblUpdate.Text = $"You're up to date ({AppVersion()}).";
+                Log($"No update available — {AppVersion()} is the latest release.");
+                return;
+            }
+
+            _lblUpdate.ForeColor = Color.FromArgb(120, 210, 140);
+            _lblUpdate.Text = $"Update available: v{info.Version} (you have {AppVersion()}).";
+            Log($"Update available: v{info.Version}" +
+                (info.SizeMb >= 1 ? $" ({info.SizeMb:0} MB download)." : "."));
+
+            string? setup;
+            using (var dlg = new UpdateForm(info, AppVersion()))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK || dlg.SetupPath is null)
+                {
+                    Log("Update postponed — you can install it any time from this button.");
+                    return;
+                }
+                setup = dlg.SetupPath;
+            }
+
+            // Hand over to the setup: it stops ToPlay, swaps the files in and
+            // starts the new version. Stop streaming first so nothing is mid-frame.
+            Log("Starting the update — ToPlay will restart when it's done.");
+            StopServer();
+            UpdateService.LaunchInstaller(setup, AppContext.BaseDirectory);
+            _forceExit = true;
+            Close();
+            return;
+        }
+        catch (Exception ex)
+        {
+            _lblUpdate.ForeColor = Color.FromArgb(226, 150, 145);
+            _lblUpdate.Text = "Couldn't check for updates.";
+            Log("Update check failed: " + ex.Message);
+            MessageBox.Show(this,
+                "ToPlay couldn't check for updates:\n\n" + ex.Message +
+                "\n\nCheck that this PC is online and try again.",
+                "Check for updates", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        finally
+        {
+            _checkingUpdate = false;
+            if (!IsDisposed && !Disposing)
+            {
+                _btnUpdate.Enabled = true;
+                _btnUpdate.Text = "Check for updates";
+            }
+        }
     }
 
     // ======================= safe close =======================

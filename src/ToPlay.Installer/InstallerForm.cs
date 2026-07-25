@@ -42,9 +42,17 @@ public sealed class InstallerForm : Form
     private readonly System.Windows.Forms.Timer _timer = new();
     private string _installedExe = "";
 
-    public InstallerForm()
+    // Set when ToPlay's own "Check for updates" button launched us with
+    // --update "<install folder>": no questions asked, just upgrade in place.
+    private readonly bool _unattended;
+    private bool _succeeded;
+
+    public InstallerForm(bool unattended = false, string? targetDir = null)
     {
-        Text = "ToPlay Setup";
+        _unattended = unattended;
+
+        Text = _unattended ? "ToPlay Update" : "ToPlay Setup";
+
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -58,7 +66,7 @@ public sealed class InstallerForm : Form
 
         var title = new Label
         {
-            Text = "Install ToPlay",
+            Text = _unattended ? "Updating ToPlay" : "Install ToPlay",
             Font = new Font("Segoe UI", 16f, FontStyle.Bold),
             Location = new Point(20, 16),
             AutoSize = true
@@ -67,12 +75,15 @@ public sealed class InstallerForm : Form
 
         var subtitle = new Label
         {
-            Text = "Play your PC on your phone — this installs the app and everything it needs.",
+            Text = _unattended
+                ? "Installing the new version — your accounts and settings are kept. ToPlay will reopen when it's done."
+                : "Play your PC on your phone — this installs the app and everything it needs.",
             Location = new Point(22, 52),
             AutoSize = true,
             ForeColor = Color.FromArgb(138, 160, 192)
         };
         Controls.Add(subtitle);
+
 
         Controls.Add(new Label
         {
@@ -87,9 +98,11 @@ public sealed class InstallerForm : Form
         _txtPath.BackColor = Color.FromArgb(13, 19, 30);
         _txtPath.ForeColor = Color.FromArgb(230, 237, 247);
         _txtPath.BorderStyle = BorderStyle.FixedSingle;
-        _txtPath.Text = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), AppName);
+        _txtPath.Text = string.IsNullOrWhiteSpace(targetDir)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), AppName)
+            : targetDir!.TrimEnd('\\', '/');
         Controls.Add(_txtPath);
+
 
         _btnBrowse = MakeButton("Browse…", 500, 109, 100);
         _btnBrowse.Click += (_, _) =>
@@ -115,7 +128,17 @@ public sealed class InstallerForm : Form
             y += 28;
         }
 
+        if (_unattended)
+        {
+            // Upgrading in place: keep the folder as-is, don't add a second
+            // Desktop icon, and always bring ToPlay back up afterwards.
+            _chkDesktop.Checked = false;
+            _chkLaunch.Checked = true;
+            _txtPath.ReadOnly = true;
+        }
+
         _btnInstall = MakeButton("Install", 20, y + 6, 150);
+
         _btnInstall.BackColor = accent;
         _btnInstall.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
         _btnInstall.Size = new Size(150, 38);
@@ -148,12 +171,20 @@ public sealed class InstallerForm : Form
 
         Load += (_, _) =>
         {
-            Log("Ready to install.");
+            Log(_unattended ? "Starting the update…" : "Ready to install.");
             if (GetPayload() == null)
                 Log("WARNING: no application payload is embedded in this build. " +
                     "Use scripts\\build-installer.cmd to produce a real ToPlaySetup.exe.");
         };
+
+        if (_unattended)
+        {
+            // Launched by ToPlay's "Check for updates" — the user already agreed,
+            // so get straight to work instead of making them click Install again.
+            Shown += async (_, _) => await InstallAsync();
+        }
     }
+
 
     private Button MakeButton(string text, int x, int yy, int w)
     {
@@ -211,9 +242,11 @@ public sealed class InstallerForm : Form
 
             Log("");
             Log("==================================================");
-            Log("  Installation complete.");
+            Log(_unattended ? "  Update complete." : "  Installation complete.");
             Log($"  Installed to: {installDir}");
-            Log("  Launch ToPlay from the Start Menu or Desktop.");
+            Log(_unattended
+                ? "  Reopening ToPlay…"
+                : "  Launch ToPlay from the Start Menu or Desktop.");
             Log("==================================================");
 
             _progress.Style = ProgressBarStyle.Continuous;
@@ -221,7 +254,18 @@ public sealed class InstallerForm : Form
 
             if (_chkLaunch.Checked) LaunchApp();
             _btnClose.Text = "Finish";
+            _succeeded = true;
+
+            // Update mode: let the last log lines land on screen, then get out of
+            // the way — ToPlay is already coming back up on its own.
+            if (_unattended)
+            {
+                Drain();
+                await Task.Delay(1200);
+                Close();
+            }
         }
+
         catch (Exception ex)
         {
             _progress.Style = ProgressBarStyle.Continuous;
@@ -619,6 +663,9 @@ public sealed class InstallerForm : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         _timer.Stop();
+        // Update mode is scripted, so report success through the exit code.
+        if (_unattended) Environment.ExitCode = _succeeded ? 0 : 1;
         base.OnFormClosing(e);
     }
+
 }
