@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Make ToPlay secure on this phone</title>
+  <meta name="theme-color" content="#0b0f1a" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <!-- Intentionally self-contained: this page must render over plain http on a
+       phone that does NOT trust ToPlay yet, so it can't rely on anything the
+       browser might block. Only inline CSS (allowed by our CSP) is used. -->
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px 18px 60px;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(120% 90% at 50% 0%, #16233d 0%, #0b0f1a 60%);
+      color: #eaf0ff; -webkit-text-size-adjust: 100%;
+    }
+    .wrap { max-width: 560px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: .2px; }
+    .sub { color: #9fb0d0; margin: 0 0 22px; font-size: 14px; }
+    .card {
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10);
+      border-radius: 16px; padding: 16px 16px 14px; margin: 0 0 14px;
+    }
+    .card h2 { font-size: 16px; margin: 0 0 8px; display: flex; align-items: center; gap: 10px; }
+    .n {
+      flex: 0 0 26px; height: 26px; border-radius: 50%;
+      background: linear-gradient(180deg, #4f7cff, #2f55d4); color: #fff;
+      font-size: 14px; font-weight: 700; display: grid; place-items: center;
+    }
+    p { margin: 6px 0; }
+    ol, ul { margin: 6px 0 0; padding-left: 22px; }
+    li { margin: 4px 0; }
+    code { background: rgba(255,255,255,.09); padding: 1px 6px; border-radius: 6px; font-size: 14px; }
+    a.btn, button.btn {
+      display: block; width: 100%; text-align: center; text-decoration: none;
+      margin-top: 12px; padding: 14px 16px; border: 0; border-radius: 12px;
+      background: linear-gradient(180deg, #4f7cff, #2f55d4); color: #fff;
+      font-size: 16px; font-weight: 600; cursor: pointer;
+    }
+    a.btn.ghost {
+      background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.16); color: #dce6ff;
+    }
+    .hint { color: #9fb0d0; font-size: 13px; }
+    .hide { display: none; }
+    .tabs { display: flex; gap: 8px; margin: 0 0 14px; }
+    .tabs button {
+      flex: 1; padding: 10px; border-radius: 10px; font-size: 14px; font-weight: 600;
+      background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: #cfdcfa;
+    }
+    .tabs button.on { background: linear-gradient(180deg, #4f7cff, #2f55d4); color: #fff; border-color: transparent; }
+    .warn { color: #ffcf7a; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Make ToPlay secure on this phone</h1>
+    <p class="sub">
+      ToPlay streams your PC over your own Wi-Fi using its own certificate. Installing
+      that certificate once removes the “Not secure” warning and lets ToPlay install
+      to your home screen with the proper icon. It takes about a minute.
+    </p>
+
+    <div class="tabs">
+      <button id="tab-ios" class="on" type="button">iPhone / iPad</button>
+      <button id="tab-android" type="button">Android</button>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">1</span> Download the certificate</h2>
+      <p class="hint">Must be downloaded over plain http — that’s why this page isn’t https.</p>
+      <a id="dl" class="btn" href="/toplay-ca.crt">Download ToPlay certificate</a>
+      <p id="dlnote" class="hint"></p>
+    </div>
+
+    <div id="ios" class="card">
+      <h2><span class="n">2</span> Install the profile</h2>
+      <ol>
+        <li>Tap <b>Allow</b> when Safari asks to download a configuration profile.</li>
+        <li>Open <b>Settings</b> → <b>Profile Downloaded</b> (near the top) → <b>Install</b>.</li>
+        <li>Enter your passcode, then tap <b>Install</b> again.</li>
+      </ol>
+    </div>
+
+    <div id="ios2" class="card">
+      <h2><span class="n">3</span> Turn full trust ON <span class="warn">(required)</span></h2>
+      <p>iOS installs the certificate but does <b>not</b> trust it until you flip one switch:</p>
+      <ol>
+        <li><b>Settings</b> → <b>General</b> → <b>About</b></li>
+        <li>Scroll to the bottom → <b>Certificate Trust Settings</b></li>
+        <li>Turn <b>ToPlay Local CA</b> <b>ON</b> and confirm.</li>
+      </ol>
+      <p class="hint">Skipping this step is the #1 reason the warning comes back.</p>
+    </div>
+
+    <div id="android" class="card hide">
+      <h2><span class="n">2</span> Install it as a CA certificate</h2>
+      <ol>
+        <li>Open <b>Settings</b> → search for <b>certificate</b>.</li>
+        <li>Choose <b>Install a certificate</b> → <b>CA certificate</b> → <b>Install anyway</b>.</li>
+        <li>Pick the downloaded <code>ToPlay-CA.crt</code> from Downloads.</li>
+      </ol>
+      <p class="hint">Some phones name it “Encryption &amp; credentials” or “Install from storage”.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="n" id="lastn">4</span> Open ToPlay securely</h2>
+      <p>Come back over https, sign in, then use <b>Add to Home Screen</b> for full-screen play.</p>
+      <a id="go" class="btn" href="/">Open ToPlay (secure)</a>
+      <a id="again" class="btn ghost" href="/trust.html">Certificate still not trusted? Start over</a>
+    </div>
+
+    <p class="hint" id="ver"></p>
+  </div>
+
+  <script src="/js/trust.js"></script>
+</body>
+</html>

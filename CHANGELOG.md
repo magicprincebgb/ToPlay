@@ -3,6 +3,62 @@
 All notable changes to **ToPlay** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] — 2026-07-25
+
+A fix release for three reported problems: **PC sound killing the picture and
+touch**, the **“Not secure” warning on iPhone**, and the **missing icon when
+adding ToPlay to the home screen**. Drop-in upgrade — accounts and settings
+carry over.
+
+### Fixed — PC sound no longer breaks video or touch
+- **Audio capture moved off the connection thread.** Turning “PC sound” on
+  started Windows audio capture (WASAPI/COM) *inside* the WebRTC connection
+  callback. That init can take hundreds of milliseconds, and while it ran the
+  connection couldn't finish its handshake — so the data channel never opened
+  (dead touch) and no keyframe was requested (black screen). Capture now starts
+  on its own thread after the connection is live.
+- **Video and audio no longer share one encryption context unsafely.** Both were
+  writing through the same SRTP cipher from different threads, which could
+  corrupt packets and stall the decoder. All sends are now serialized.
+- **Audio can't be sent before it's negotiated**, and per-frame send errors are
+  rate-limited to one message every 5 seconds (previously they could flood the
+  Control Panel log dozens of times a second and slow the host down).
+- **The host now sanity-checks the browser's answer.** If enabling sound would
+  have cost you video or touch, the host refuses that connection instead of
+  handing you a dead screen.
+- **New client watchdog.** 8 seconds after connecting, ToPlay verifies it really
+  has a decoded picture *and* an open input channel. If not, it automatically
+  turns PC sound off, remembers the choice for that phone, tells you why, and
+  reconnects. You can no longer get stuck on a black screen.
+
+### Fixed — “Not secure” on iPhone / Android
+- **New guided help page at `/trust.html`** (linked from the startup banner and
+  the install dialog): platform-aware, three tappable steps, with the exact
+  iPhone path most people miss — **Settings → General → About → Certificate
+  Trust Settings → turn ToPlay ON**. Installing the profile alone is *not*
+  enough on iOS, which is why the warning kept coming back.
+- **Removed the HSTS header.** With it, Safari/Chrome made the certificate
+  warning *un-bypassable*, so a phone that hadn't installed the certificate yet
+  could not reach ToPlay at all. The warning is now skippable again while you
+  finish the certificate setup.
+- **The certificate is reissued automatically when your PC's IP changes.** After
+  a router reboot or new Wi-Fi lease, the old certificate no longer matched the
+  new address and every phone showed a warning again. ToPlay now detects this at
+  startup and issues a fresh certificate covering the current addresses.
+- The whole trust flow (help page, its script, styles and the `.crt` file) is
+  reachable over plain http, because iOS refuses to download a certificate from
+  a site it doesn't trust yet.
+
+### Fixed — home-screen icon on iPhone
+- **The web app manifest is now served as `application/manifest+json`.** It was
+  being sent as a generic binary type, so iOS ignored it entirely.
+- **Added the icon sizes iOS actually asks for** (152 and 167 px alongside 180),
+  plus `apple-touch-icon-precomposed`, explicit `sizes` attributes, and an
+  `apple-mobile-web-app-title` so the home-screen label reads “ToPlay”. Missing
+  size hints are why iOS fell back to a screenshot of the page.
+- The 180 px icon is now listed in the manifest too, and `manifest-src` was
+  added to the security policy so the manifest is never blocked.
+
 ## [2.0.0] — 2026-07-25
 
 A polish release focused on three things: **lower latency**, **tighter

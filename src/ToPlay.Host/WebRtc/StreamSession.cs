@@ -23,12 +23,24 @@ public sealed class StreamSession : IDisposable
 
     private bool _viewerAdded;
     private bool _audioEnabled;      // phone asked for PC sound (m=audio in offer)
-    private bool _listenerAdded;
     private volatile bool _canSend;
     private volatile bool _waitingForKeyframe = true;
-    private bool _disposed;
+    private volatile bool _disposed;
+
+    // Audio attach/detach is refcounted on the shared AudioStreamer, so it must
+    // happen exactly once per session even though it is started off-thread.
+    private readonly object _audioGate = new();
+    private bool _audioAttached;
+    private volatile bool _audioNegotiated;
+
+    // SRTP protects every outgoing packet with ONE shared cipher context, so the
+    // video thread and the audio thread must never encrypt at the same time —
+    // concurrent sends corrupt packets (black picture, dead data channel).
+    private readonly object _sendGate = new();
+    private long _lastSendErrorLog;
 
     private RTCDataChannel? _dc;
+
 
 
 
@@ -71,6 +83,12 @@ public sealed class StreamSession : IDisposable
         {
             // Format agreed; sending becomes valid once ICE/DTLS is connected.
         };
+
+        // Only push Opus once the browser has actually agreed an audio format.
+        // Sending before that throws once per 20 ms frame, and the resulting
+        // 50-lines-a-second error storm alone is enough to stall the stream.
+        _pc.OnAudioFormatsNegotiated += _ => _audioNegotiated = true;
+
 
         _pc.onconnectionstatechange += OnConnectionStateChange;
 
@@ -145,14 +163,20 @@ public sealed class StreamSession : IDisposable
                     _waitingForKeyframe = true;
                     _streamer.AddViewer();
                 }
-                if (_audioEnabled && _audio != null && !_listenerAdded)
-                {
-                    _listenerAdded = true;
-                    _audio.AudioFrameReady += OnAudioFrame;
-                    _audio.AddListener();
-                }
+
+                // Video + touch go live immediately.
                 _canSend = true;
+
+                // Sound is started on a worker thread ON PURPOSE. We are on
+                // SIPSorcery's connection-event thread here, which also drives
+                // DTLS/SCTP setup: opening the WASAPI loopback device can block
+                // it for hundreds of milliseconds, which used to delay the data
+                // channel and the first keyframe — the "black screen and touch
+                // doesn't work when PC sound is on" bug.
+                if (_audioEnabled && _audio != null)
+                    _ = Task.Run(StartAudioSafe);
                 break;
+
 
 
             case RTCPeerConnectionState.disconnected:
@@ -176,13 +200,14 @@ public sealed class StreamSession : IDisposable
 
         try
         {
-            _pc.SendVideo(frame.DurationRtp, frame.AnnexB);
+            lock (_sendGate) _pc.SendVideo(frame.DurationRtp, frame.AnnexB);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[webrtc:{_id}] SendVideo failed: {ex.Message}");
+            LogSendError("SendVideo", ex);
         }
     }
+
 
     /// <summary>
     /// Pushes one 20 ms Opus frame. The frame is paced by the sound-card clock,
@@ -191,16 +216,75 @@ public sealed class StreamSession : IDisposable
     /// </summary>
     private void OnAudioFrame(byte[] opus)
     {
-        if (!_canSend || _disposed) return;
+        // _audioNegotiated: never push RTP the browser hasn't agreed to receive.
+        if (!_canSend || _disposed || !_audioNegotiated) return;
         try
         {
-            _pc.SendAudio(960, opus);
+            lock (_sendGate) _pc.SendAudio(960, opus);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[webrtc:{_id}] SendAudio failed: {ex.Message}");
+            LogSendError("SendAudio", ex);
         }
     }
+
+    /// <summary>
+    /// Attaches this session to the shared loopback capture (starting it if we
+    /// are the first listener). Safe to call from a worker thread and safe to
+    /// race with <see cref="Dispose"/>.
+    /// </summary>
+    private void StartAudioSafe()
+    {
+        var audio = _audio;
+        if (audio == null) return;
+
+        lock (_audioGate)
+        {
+            if (_disposed || _audioAttached) return;
+            _audioAttached = true;
+            try
+            {
+                audio.AudioFrameReady += OnAudioFrame;
+                audio.AddListener();
+                Console.WriteLine($"[webrtc:{_id}] PC sound attached.");
+            }
+            catch (Exception ex)
+            {
+                _audioAttached = false;
+                try { audio.AudioFrameReady -= OnAudioFrame; } catch { }
+                Console.WriteLine($"[webrtc:{_id}] PC sound unavailable: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>Detaches from the shared capture (stops it when nobody is left).</summary>
+    private void StopAudioSafe()
+    {
+        var audio = _audio;
+        if (audio == null) return;
+
+        lock (_audioGate)
+        {
+            if (!_audioAttached) return;
+            _audioAttached = false;
+            try { audio.AudioFrameReady -= OnAudioFrame; } catch { }
+            try { audio.RemoveListener(); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// Logs a send failure at most once every 5 seconds. Media is sent 50-120
+    /// times per second, so an unthrottled message here becomes a console flood
+    /// that stalls the whole host (the Control Panel reads this output).
+    /// </summary>
+    private void LogSendError(string what, Exception ex)
+    {
+        var now = Environment.TickCount64;
+        if (now - _lastSendErrorLog < 5000) return;
+        _lastSendErrorLog = now;
+        Console.WriteLine($"[webrtc:{_id}] {what} failed: {ex.Message}");
+    }
+
 
 
     /// <summary>Accepts the browser's SDP offer and returns our SDP answer.</summary>
@@ -269,16 +353,47 @@ public sealed class StreamSession : IDisposable
         // track as soon as it arrives keeps audio latency minimal while the equal
         // real-time pacing keeps the two in step.
 
+        // Sanity-check the answer before we hand it to the phone. If adding the
+        // optional audio track upset the negotiation — a missing/rejected video
+        // or data section, or no audio section after all — the phone would get a
+        // black screen with dead touch. Refusing the answer instead makes the
+        // player fall straight back to the rock-solid video-only path.
+        if (_audioEnabled)
+        {
+            bool video = MediaActive(answer.sdp, "video");
+            bool audio = MediaActive(answer.sdp, "audio");
+            bool data = !MediaActive(offerSdp, "application") || MediaActive(answer.sdp, "application");
+            if (!video || !audio || !data)
+            {
+                Console.WriteLine($"[webrtc:{_id}] PC sound broke the negotiation " +
+                                  $"(video={video}, audio={audio}, input={data}); retrying video-only.");
+                return null;
+            }
+        }
+
         return answer.sdp;
     }
 
-    private static bool ContainsAudioMedia(string sdp)
+    private static bool ContainsAudioMedia(string sdp) => MediaActive(sdp, "audio");
+
+    /// <summary>
+    /// True when the SDP has an <c>m=&lt;kind&gt;</c> section with a non-zero
+    /// port (port 0 means the section was rejected).
+    /// </summary>
+    private static bool MediaActive(string sdp, string kind)
     {
-        foreach (var line in sdp.Split('\n'))
-            if (line.StartsWith("m=audio", StringComparison.Ordinal))
-                return true;
+        var prefix = "m=" + kind + " ";
+        foreach (var raw in sdp.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (!line.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2 && int.TryParse(parts[1], out var port)) return port != 0;
+            return true;
+        }
         return false;
     }
+
 
 
     public void AddRemoteIceCandidate(string candidate, string? sdpMid, ushort sdpMLineIndex)
@@ -311,12 +426,8 @@ public sealed class StreamSession : IDisposable
             try { _streamer.RemoveViewer(); } catch { }
         }
 
-        if (_listenerAdded && _audio != null)
-        {
-            _listenerAdded = false;
-            try { _audio.AudioFrameReady -= OnAudioFrame; } catch { }
-            try { _audio.RemoveListener(); } catch { }
-        }
+        StopAudioSafe();
+
 
 
         try { _pc.close(); } catch { }

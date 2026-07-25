@@ -149,6 +149,11 @@ Write-Host "Generating web icons..."
 Save-Png (New-Icon 192) (Join-Path $www 'icon-192.png')
 Save-Png (New-Icon 512) (Join-Path $www 'icon-512.png')
 Save-Png (New-Icon 180) (Join-Path $www 'apple-touch-icon.png')
+# iOS picks the apple-touch-icon whose declared size matches the device; iPads
+# ask for 152/167, and a missing file there makes "Add to Home Screen" fall back
+# to a screenshot instead of the ToPlay mark.
+Save-Png (New-Icon 167) (Join-Path $www 'apple-touch-icon-167.png')
+Save-Png (New-Icon 152) (Join-Path $www 'apple-touch-icon-152.png')
 Write-Ico @((New-Icon 16), (New-Icon 32), (New-Icon 48)) (Join-Path $www 'favicon.ico')
 
 Write-Host "Generating application icon..."

@@ -92,17 +92,38 @@ can't self‑register.
 2. Open the phone URL from the Control Panel, e.g. `https://192.168.1.23:8443/`.
 3. **Install the ToPlay certificate once (removes the "Not secure" warning).**
    ToPlay runs its own little Certificate Authority; installing its public
-   certificate on the phone makes the padlock green and unlocks PWA install. Open
-   `https://192.168.1.23:8443/toplay-ca.crt` (or tap the link in the on‑screen
-   install dialog), then:
-   - **iPhone/iPad:** open the downloaded profile → *Settings → General → VPN &
-     Device Management → ToPlay Local CA → Install*, **then** *Settings → General
-     → About → Certificate Trust Settings* and turn **ToPlay Local CA ON**.
-   - **Android:** *Settings → Security → Encryption & credentials → Install a
-     certificate → CA certificate* → pick the downloaded `ToPlay-CA.crt`.
+   certificate on the phone makes the padlock green and unlocks PWA install.
 
-   (You can skip this and just tap *Continue/Advanced → proceed* each time, but
-   installing it once is cleaner and lets you "Add to Home Screen".)
+   Open the guided page **over plain http** — iOS refuses to download a
+   certificate from a site it doesn't trust yet, so this address must be `http`
+   and port **8080**:
+
+   ```
+   http://192.168.1.23:8080/trust.html
+   ```
+
+   (Use your own PC's IP — the Control Panel shows it, and the host prints the
+   exact link in its console banner. You can also tap *Fix it in 3 taps* in the
+   on‑screen install dialog.) The page detects your phone and walks you through:
+   - **iPhone/iPad:** tap **Download**, then *Settings → General → VPN & Device
+     Management → ToPlay Local CA → Install*, **then — this step is the one
+     everyone misses —** *Settings → General → About → Certificate Trust
+     Settings* and turn **ToPlay Local CA ON**. Without that switch iOS still
+     shows "Not secure".
+   - **Android:** tap **Download**, then *Settings → Security → Encryption &
+     credentials → Install a certificate → CA certificate* → pick the downloaded
+     `ToPlay-CA.crt`.
+
+   Then tap **Open ToPlay securely** on the same page to jump to `https://…:8443/`.
+
+   (You can skip all of this and just tap *Continue/Advanced → proceed* each
+   time, but installing it once is cleaner and lets you "Add to Home Screen"
+   with the proper icon.)
+
+   > If your PC's LAN IP changes (new router, new Wi‑Fi, DHCP lease), ToPlay
+   > automatically issues a fresh server certificate for the new address. The CA
+   > you installed stays valid — no need to repeat these steps.
+
 4. **Log in** with the account you created.
 5. **Add to Home Screen** for a true full‑screen, landscape experience. ToPlay
    shows an in‑page dialog with the exact steps when you're not already installed:
@@ -208,7 +229,14 @@ scripts/
 - **Phone can't reach the URL** — re‑run **First‑time setup** (it opens the
   firewall) and make sure your Wi‑Fi profile is **Private**, not Public. Confirm
   both devices are on the same subnet.
-- **iPhone/Android certificate warning** — expected for a self‑signed cert; trust it once.
+- **iPhone/Android "Not secure" warning** — open
+  `http://<your‑pc‑ip>:8080/trust.html` (plain **http**, port **8080**) and follow
+  the 3 taps. On iPhone the warning survives installing the profile until you also
+  turn the CA **ON** in *Settings → General → About → Certificate Trust Settings*.
+- **Home‑screen icon is blank on iPhone** — install the certificate first (Safari
+  won't fetch icons from an untrusted origin), then remove and re‑add the
+  shortcut.
+
 - **Video won't start / stalls** — try a lower preset (720p60) or a different
   encoder in Settings. Some laptops need the discrete GPU enabled for NVENC.
 - **Touches land in the wrong spot** — make sure the streamed **monitor** in

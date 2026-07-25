@@ -44,9 +44,15 @@ public static class DevCertificate
             {
                 var existing = new X509Certificate2(pfxPath, password,
                     X509KeyStorageFlags.Exportable | X509KeyStorageFlags.MachineKeySet);
+                // Also require that the cert still covers the addresses this PC
+                // has TODAY. After a DHCP lease change the old SAN no longer
+                // lists the new LAN IP, and every phone shows "Not secure"
+                // again even though the CA is installed — so reissue instead.
                 if (existing.NotAfter > DateTime.UtcNow.AddDays(20) &&
-                    string.Equals(existing.Issuer, ca.Subject, StringComparison.OrdinalIgnoreCase))
+                    string.Equals(existing.Issuer, ca.Subject, StringComparison.OrdinalIgnoreCase) &&
+                    CoversCurrentAddresses(existing))
                     return existing;
+                Console.WriteLine("[cert] Network address changed — issuing a fresh server certificate.");
             }
             catch { /* regenerate below */ }
         }
@@ -55,6 +61,36 @@ public static class DevCertificate
         try { File.WriteAllBytes(pfxPath, leaf.Export(X509ContentType.Pfx, password)); }
         catch (Exception ex) { Console.WriteLine($"[cert] Could not persist server cert: {ex.Message}"); }
         return leaf;
+    }
+
+    /// <summary>
+    /// True when the certificate's SAN already lists every address a phone might
+    /// use to reach this PC (all current LAN IPv4s + this machine's host name).
+    /// Missing entries are exactly what causes a browser security warning.
+    /// </summary>
+    private static bool CoversCurrentAddresses(X509Certificate2 cert)
+    {
+        var san = cert.Extensions
+            .OfType<X509Extension>()
+            .FirstOrDefault(e => e.Oid?.Value == "2.5.29.17");
+        if (san is null) return false;
+
+        // Format() yields e.g. "DNS Name=localhost, IP Address=192.168.10.233".
+        var entries = san.Format(false)
+            .Split(new[] { ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Contains('=') ? p[(p.IndexOf('=') + 1)..] : p)
+            .Select(p => p.Trim())
+            .Where(p => p.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Unknown/locale-specific formatting: don't churn the certificate.
+        if (entries.Count == 0) return true;
+
+        foreach (var ip in LocalIPv4Addresses())
+            if (!entries.Contains(ip.ToString())) return false;
+
+        try { if (!entries.Contains(Dns.GetHostName())) return false; } catch { }
+        return true;
     }
 
     // ---- CA ----------------------------------------------------------------

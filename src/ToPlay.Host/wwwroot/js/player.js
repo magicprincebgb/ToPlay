@@ -29,6 +29,14 @@ let reconnectTimer = null;
 let pingTimer = null;
 let kbdLastValue = '';
 let gotVideo = false;
+let watchdogTimer = null;
+
+// Own MediaStream per kind instead of trusting the host's stream ids: the video
+// element must stay muted (so autoplay is never blocked) while PC sound plays
+// through its own <audio>. Mixing them into one stream would mute the sound.
+let videoStream = null;
+let audioStream = null;
+
 
 let fitMode = localStorage.getItem('toplay_fit') || 'contain';
 video.style.objectFit = fitMode;
@@ -124,21 +132,24 @@ async function negotiate() {
     if (e.track.kind === 'audio') {
       // Route PC audio into its own (non-muted) element. The <video> stays
       // muted so its autoplay never gets blocked; audio plays here instead.
-      let s = pcaudio.srcObject;
-      if (!(s instanceof MediaStream)) { s = new MediaStream(); pcaudio.srcObject = s; }
-      if (!s.getAudioTracks().includes(e.track)) s.addTrack(e.track);
+      if (!audioStream) { audioStream = new MediaStream(); pcaudio.srcObject = audioStream; }
+      if (!audioStream.getAudioTracks().includes(e.track)) audioStream.addTrack(e.track);
+      if (pcaudio.srcObject !== audioStream) pcaudio.srcObject = audioStream;
       pcaudio.play().then(hideSoundNudge).catch(showSoundNudge);
-    } else {
-      gotVideo = true;
-      if (video.srcObject !== e.streams[0]) {
-        video.srcObject = e.streams[0];
-        video.play().catch(() => {});
-      }
+      return;   // audio alone is NOT proof the picture arrived
     }
+
+    gotVideo = true;
+    if (!videoStream) videoStream = new MediaStream();
+    if (!videoStream.getVideoTracks().includes(e.track)) videoStream.addTrack(e.track);
+    if (video.srcObject !== videoStream) video.srcObject = videoStream;
+    video.play().catch(() => {});
+
     showOverlay(false);
     showHud();
     flash('Streaming');
   };
+
 
 
   pc.onicecandidate = (e) => {
@@ -161,7 +172,56 @@ async function negotiate() {
   const offer = await pc.createOffer({ offerToReceiveVideo: true });
   await pc.setLocalDescription(offer);
   ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+  startWatchdog();
 }
+
+// ---------------------------------------------------------------- watchdog
+// A connection can look "connected" and still show nothing: a decoder that
+// never gets a frame, or an input channel that never opens. That is the worst
+// possible state for the user (black screen, dead touch, no explanation), so we
+// verify the two things that actually matter — a decoded picture and an open
+// input channel — and self-heal if either is missing.
+function hasPicture() {
+  return !!video.videoWidth && video.readyState >= 2;
+}
+
+function startWatchdog() {
+  clearWatchdog();
+  watchdogTimer = setTimeout(() => {
+    watchdogTimer = null;
+    if (!started) return;
+    const picture = hasPicture();
+    const input = dc && dc.readyState === 'open';
+    if (picture && input) return;                 // all good
+
+    // PC sound is the only optional part of the pipeline, so drop it first.
+    if (disableAudio(picture ? 'Touch input' : 'Video')) {
+      teardown();
+      setTimeout(() => start(), 300);
+      return;
+    }
+    onDisconnected(picture ? 'Input unavailable' : 'No video from PC');
+  }, 8000);
+}
+
+function clearWatchdog() {
+  clearTimeout(watchdogTimer);
+  watchdogTimer = null;
+}
+
+// Permanently turns PC sound off for this device and remembers the choice, so
+// the user is never stuck on a broken stream. Returns false when sound was
+// already off (i.e. the problem is something else).
+function disableAudio(what) {
+  if (!audioEnabled) return false;
+  audioEnabled = false;
+  localStorage.setItem('toplay_audio', 'off');
+  try { selAudio.value = 'off'; } catch {}
+  hideSoundNudge();
+  flash(`${what} needs PC sound off — switching to video only`);
+  return true;
+}
+
 
 async function onSignal(ev) {
   let msg;
@@ -175,13 +235,13 @@ async function onSignal(ev) {
       // added audio track is by far the likeliest cause — never leave the user
       // stuck on a black screen (no video, no touch): permanently fall back to
       // the rock-solid video-only path for this session and reconnect.
-      if (audioEnabled) {
-        audioEnabled = false;
-        localStorage.setItem('toplay_audio', 'off');
-        try { selAudio.value = 'off'; } catch {}
-        flash('PC sound not supported here — video only');
+      if (disableAudio('PC sound')) {
+        teardown();
+        setTimeout(() => start(), 400);
+        return;
       }
       onDisconnected('Negotiation failed');
+
     }
   } else if (msg.type === 'candidate' && msg.candidate) {
     try {
@@ -192,6 +252,14 @@ async function onSignal(ev) {
       });
     } catch { /* ignore late candidates */ }
   } else if (msg.type === 'error') {
+    // The host refuses an answer that would have dropped video/touch (that only
+    // happens when this browser mishandles the extra audio track). Retry once
+    // with PC sound off instead of leaving the user on a dead screen.
+    if (disableAudio('PC sound')) {
+      teardown();
+      setTimeout(() => start(), 400);
+      return;
+    }
     setStatus('Host: ' + msg.message);
     showOverlay(true);
     teardown();
@@ -203,12 +271,7 @@ function onDisconnected(reason) {
   // Safety net: if PC sound was on but we never got a working video stream,
   // the audio negotiation is the likely culprit on this device. Permanently
   // fall back to reliable video-only so the user is never stuck on black.
-  if (audioEnabled && !gotVideo) {
-    audioEnabled = false;
-    localStorage.setItem('toplay_audio', 'off');
-    try { selAudio.value = 'off'; } catch {}
-    flash('PC sound not supported here — video only');
-  }
+  if (audioEnabled && !gotVideo) disableAudio('PC sound');
   setStatus(reason + ' — reconnecting…');
   showOverlay(true);
   teardown();
@@ -219,6 +282,7 @@ function onDisconnected(reason) {
 function teardown() {
   started = false;
   gotVideo = false;
+  clearWatchdog();
   stopPing();
   closeKbd();
   hideSoundNudge();
@@ -238,6 +302,8 @@ function teardown() {
   try { pc && pc.close(); } catch {}
   try { ws && ws.close(); } catch {}
   dc = pc = ws = null;
+  videoStream = null;
+  audioStream = null;
 }
 
 

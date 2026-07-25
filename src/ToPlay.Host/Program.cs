@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.StaticFiles;
 using SIPSorcery.Net;
 using ToPlay.Host.Config;
 using ToPlay.Host.Data;
@@ -85,8 +86,7 @@ app.Use(async (ctx, next) =>
     //    Exception: the CA certificate download stays reachable over plain HTTP.
     //    iOS/Safari won't complete an HTTPS download from a host it doesn't yet
     //    trust — a chicken-and-egg — so this one file must be fetchable on http.
-    var isCaDownload = ctx.Request.Path.Equals("/toplay-ca.crt", StringComparison.OrdinalIgnoreCase);
-    if (config.UseHttps && !ctx.Request.IsHttps && !IsLocal(ctx) && !isCaDownload)
+    if (config.UseHttps && !ctx.Request.IsHttps && !IsLocal(ctx) && !IsPlainHttpAllowed(ctx.Request.Path))
     {
         var target = $"https://{reqHost}:{config.HttpsPort}{ctx.Request.Path}{ctx.Request.QueryString}";
         ctx.Response.Redirect(target, permanent: false);
@@ -105,19 +105,29 @@ app.Use(async (ctx, next) =>
     // stays enabled for the player's immersive mode.
     h["Permissions-Policy"] =
         "camera=(), microphone=(), geolocation=(), payment=(), usb=(), midi=()";
-    if (ctx.Request.IsHttps)
-        h["Strict-Transport-Security"] = "max-age=31536000";
+    // NOTE: deliberately NO Strict-Transport-Security. ToPlay's certificate is
+    // self-signed, so a phone that hasn't installed the CA yet must be able to
+    // tap through the browser's warning. HSTS makes that warning un-bypassable
+    // (Safari/Chrome hard-fail), which locked users out of their own PC.
     h["Content-Security-Policy"] =
         "default-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; " +
         "connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self'; " +
-        "base-uri 'none'; frame-ancestors 'none'; object-src 'none'";
+        "manifest-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'";
 
     await next();
 });
 
+// iOS only treats the file as a web-app manifest when it arrives with the right
+// MIME type; without this it is served as application/octet-stream, the manifest
+// is ignored and "Add to Home Screen" falls back to a screenshot icon.
+var contentTypes = new FileExtensionContentTypeProvider();
+contentTypes.Mappings[".webmanifest"] = "application/manifest+json";
+contentTypes.Mappings[".crt"] = "application/x-x509-ca-cert";
+
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
 {
+    ContentTypeProvider = contentTypes,
     // Let phones cache CSS/JS/icons briefly instead of re-fetching every page
     // load; short max-age so app updates still roll out within minutes.
     OnPrepareResponse = static resp =>
@@ -134,6 +144,17 @@ app.MapGet("/toplay-ca.crt", () =>
         ? Results.File(caCerPath, "application/x-x509-ca-cert", "ToPlay-CA.crt")
         : Results.NotFound("Certificate not generated (HTTPS may be disabled)."));
 
+// Unauthenticated, non-sensitive facts the certificate-help page needs to build
+// the correct plain-http download link (iOS refuses .crt over untrusted HTTPS).
+app.MapGet("/api/pubinfo", () => Results.Json(new
+{
+    httpPort = config.HttpPort,
+    httpsPort = config.HttpsPort,
+    useHttps = config.UseHttps,
+    version = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "",
+    certReady = File.Exists(caCerPath)
+}));
+
 // ---- helpers ---------------------------------------------------------------
 
 
@@ -142,6 +163,17 @@ static bool IsLocal(HttpContext ctx)
     var ip = ctx.Connection.RemoteIpAddress;
     return ip != null && IPAddress.IsLoopback(ip);
 }
+
+// Pages/files that must stay reachable over plain http. iOS/Safari refuses to
+// download or trust a certificate from a host it doesn't trust yet, so the whole
+// "install the certificate" flow (help page, its script, and the .crt itself)
+// has to work before HTTPS does — otherwise it's a chicken-and-egg lockout.
+static bool IsPlainHttpAllowed(PathString path) =>
+    path.Equals("/toplay-ca.crt", StringComparison.OrdinalIgnoreCase) ||
+    path.Equals("/trust.html", StringComparison.OrdinalIgnoreCase) ||
+    path.Equals("/js/trust.js", StringComparison.OrdinalIgnoreCase) ||
+    path.Equals("/css/styles.css", StringComparison.OrdinalIgnoreCase) ||
+    path.Equals("/api/pubinfo", StringComparison.OrdinalIgnoreCase);
 
 // True for loopback and private LAN ranges only (RFC1918 IPv4, link-local,
 // IPv6 unique-local/link-local). Everything else — i.e. the public internet —
@@ -422,8 +454,10 @@ void PrintBanner(HostConfig cfg, string hotkeyDesc)
     Console.WriteLine($"  On your phone (same Wi-Fi):         {scheme}://{ip}:{port}/");
     if (cfg.UseHttps)
     {
-        Console.WriteLine("  First time on a phone? To remove the browser \"Not secure\" warning,");
-        Console.WriteLine($"  open this once and install the certificate: {scheme}://{ip}:{port}/toplay-ca.crt");
+        Console.WriteLine("  First time on a phone? Fix the \"Not secure\" warning in 3 taps:");
+        Console.WriteLine($"     open  http://{ip}:{cfg.HttpPort}/trust.html  and follow the steps");
+        Console.WriteLine("     (iPhone also needs: Settings > General > About >");
+        Console.WriteLine("      Certificate Trust Settings > turn ToPlay ON)");
     }
     Console.WriteLine($"  Host status: {host.StatusMessage}");
 

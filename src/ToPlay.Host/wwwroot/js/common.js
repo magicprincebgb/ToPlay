@@ -115,16 +115,25 @@ export function showInstallHelp() {
   }
   card.appendChild(steps);
 
-  // Certificate hint — installing the CA once removes the "Not secure" warning.
+  // Certificate hint — points at the guided page (not the raw .crt), because on
+  // iOS the download is only half the job: full trust must also be switched on
+  // in Settings → General → About → Certificate Trust Settings.
   const note = document.createElement('p');
   note.className = 'install-note';
-  note.append('First time and seeing “Not secure”? ');
+  note.append('Seeing “Not secure”, or the icon won’t load? ');
   const certLink = document.createElement('a');
-  certLink.href = '/toplay-ca.crt';
-  certLink.textContent = 'Install the ToPlay certificate';
+  certLink.href = `http://${location.hostname}:8080/trust.html`;
+  certLink.textContent = 'Fix it in 3 taps';
   note.appendChild(certLink);
-  note.append(' once to trust this PC.');
+  note.append(' — install the ToPlay certificate once.');
   card.appendChild(note);
+
+  // The help page must be reached over plain http (iOS refuses a certificate
+  // download from an untrusted origin), so resolve the real http port.
+  fetch('/api/pubinfo')
+    .then(r => r.json())
+    .then(i => { certLink.href = `http://${location.hostname}:${i.httpPort}/trust.html`; })
+    .catch(() => {});
 
   const row = document.createElement('div');
   row.className = 'btn-row';
