@@ -200,8 +200,11 @@ public static class Ffmpeg
         };
 
         // gdigrab captures a rectangle of the virtual desktop at an offset.
+        // "-fflags nobuffer -flags low_delay" keep ffmpeg from queueing frames
+        // on the input side — every buffered frame is glass-to-glass latency.
         return string.Join(' ',
             "-hide_banner -loglevel warning -nostats",
+            "-fflags nobuffer -flags low_delay",
             $"-f gdigrab -framerate {fps} -draw_mouse 1",
             $"-offset_x {monitor.X} -offset_y {monitor.Y}",
             $"-video_size {monitor.Width}x{monitor.Height} -i desktop",

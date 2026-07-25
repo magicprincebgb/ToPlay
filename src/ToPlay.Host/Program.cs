@@ -41,6 +41,7 @@ if (config.UseHttps)
 
 builder.WebHost.ConfigureKestrel(k =>
 {
+    k.AddServerHeader = false; // don't advertise the server stack
     k.ListenAnyIP(config.HttpPort);
     if (config.UseHttps && certHolder != null)
         k.ListenAnyIP(config.HttpsPort, lo => lo.UseHttps(certHolder.Certificate));
@@ -98,6 +99,14 @@ app.Use(async (ctx, next) =>
     h["X-Content-Type-Options"] = "nosniff";
     h["X-Frame-Options"] = "DENY";
     h["Referrer-Policy"] = "no-referrer";
+    h["Cross-Origin-Opener-Policy"] = "same-origin";
+    h["Cross-Origin-Resource-Policy"] = "same-origin";
+    // Deny powerful browser features we never use (camera etc.); fullscreen
+    // stays enabled for the player's immersive mode.
+    h["Permissions-Policy"] =
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), midi=()";
+    if (ctx.Request.IsHttps)
+        h["Strict-Transport-Security"] = "max-age=31536000";
     h["Content-Security-Policy"] =
         "default-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; " +
         "connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self'; " +
@@ -107,7 +116,13 @@ app.Use(async (ctx, next) =>
 });
 
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // Let phones cache CSS/JS/icons briefly instead of re-fetching every page
+    // load; short max-age so app updates still roll out within minutes.
+    OnPrepareResponse = static resp =>
+        resp.Context.Response.Headers.CacheControl = "public,max-age=300"
+});
 
 // ---- trusted-certificate download -----------------------------------------
 // Phones/tablets install this one file to make ToPlay's HTTPS fully trusted
@@ -160,10 +175,13 @@ static bool IsPrivateOrLocal(IPAddress? ip)
 
 static string? BearerToken(HttpContext ctx)
 {
+    // Tokens are accepted ONLY from the Authorization header (the WebSocket
+    // uses its subprotocol slot). No query-string fallback: URLs end up in
+    // logs and browser history, which is no place for a session token.
     var h = ctx.Request.Headers.Authorization.ToString();
     if (h.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         return h["Bearer ".Length..].Trim();
-    return ctx.Request.Query["token"];
+    return null;
 }
 
 Session? Current(HttpContext ctx) => auth.Validate(BearerToken(ctx));

@@ -28,7 +28,14 @@ async function refresh() {
   }
   tbody.querySelectorAll('button[data-id]').forEach(b => {
     b.addEventListener('click', async () => {
-      await api('/api/users/' + b.dataset.id, { method: 'DELETE' });
+      const name = b.closest('tr')?.querySelector('td')?.textContent || 'this account';
+      if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+      const { ok, data } = await api('/api/users/' + b.dataset.id, { method: 'DELETE' });
+      if (!ok || !data?.ok) {
+        show('Could not delete that account (the last admin cannot be removed).', false);
+      } else {
+        show('Account deleted.', true);
+      }
       refresh();
     });
   });

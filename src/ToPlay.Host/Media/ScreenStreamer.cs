@@ -109,6 +109,11 @@ public sealed class ScreenStreamer : IDisposable
 
         if (_proc == null) return;
 
+        // Capture/encode should not be starved by other processes: a stalled
+        // ffmpeg means dropped frames on the phone. AboveNormal (not High) is
+        // enough to win against background tasks without hurting the game.
+        try { _proc.PriorityClass = ProcessPriorityClass.AboveNormal; } catch { }
+
         _cts = new CancellationTokenSource();
         var stdout = _proc.StandardOutput.BaseStream;
         var token = _cts.Token;
@@ -143,19 +148,39 @@ public sealed class ScreenStreamer : IDisposable
 
     private void ReadLoop(Stream stdout, CancellationToken token)
     {
+        // Array-backed window (buf[head..tail)) instead of the old List<byte>
+        // pipeline: List.Add per byte + O(n) RemoveRange per NAL made the
+        // parser itself a CPU hotspot at high bitrates. BlockCopy + a moving
+        // head index does the same job with near-zero per-frame overhead.
         var readBuf = new byte[1 << 16];
-        var pending = new List<byte>(1 << 18);
-        var au = new List<byte>(1 << 16);   // current access unit
+        byte[] buf = new byte[1 << 20];
+        int head = 0;                       // first unconsumed byte
+        int tail = 0;                       // one past the last valid byte
+        var au = new MemoryStream(1 << 17); // current access unit
         bool auHasVcl = false;
+        bool auHasIdr = false;              // tracked incrementally (no rescan on emit)
         bool aligned = false;
 
-        void EmitAu(bool keyframe)
+        void EmitAu()
         {
-            if (au.Count == 0) return;
-            try { FrameReady?.Invoke(new EncodedFrame(au.ToArray(), _frameDurationRtp, keyframe)); }
+            if (au.Length == 0) return;
+            try { FrameReady?.Invoke(new EncodedFrame(au.ToArray(), _frameDurationRtp, auHasIdr)); }
             catch (Exception ex) { Console.WriteLine($"[stream] frame handler error: {ex.Message}"); }
-            au.Clear();
+            au.SetLength(0);
             auHasVcl = false;
+            auHasIdr = false;
+        }
+
+        // Finds the next 00 00 01 start code at or after head+from; returns
+        // its offset relative to head, or -1 when not present yet.
+        int FindStartCode(int from)
+        {
+            for (int i = head + Math.Max(0, from); i + 3 <= tail; i++)
+            {
+                if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1)
+                    return i - head;
+            }
+            return -1;
         }
 
         try
@@ -164,31 +189,51 @@ public sealed class ScreenStreamer : IDisposable
             {
                 int n = stdout.Read(readBuf, 0, readBuf.Length);
                 if (n <= 0) break; // ffmpeg exited
-                for (int k = 0; k < n; k++) pending.Add(readBuf[k]);
+
+                // Make room for the new chunk: compact the live window to the
+                // front of the buffer, growing it only if truly necessary.
+                if (tail + n > buf.Length)
+                {
+                    int live = tail - head;
+                    if (live + n > buf.Length)
+                    {
+                        var bigger = new byte[Math.Max(buf.Length * 2, live + n)];
+                        Buffer.BlockCopy(buf, head, bigger, 0, live);
+                        buf = bigger;
+                    }
+                    else
+                    {
+                        Buffer.BlockCopy(buf, head, buf, 0, live);
+                    }
+                    head = 0;
+                    tail = live;
+                }
+                Buffer.BlockCopy(readBuf, 0, buf, tail, n);
+                tail += n;
 
                 // Align to the first start code once.
                 if (!aligned)
                 {
-                    int first = FindStartCode(pending, 0);
-                    if (first < 0) { TrimHead(pending, Math.Max(0, pending.Count - 3)); continue; }
-                    if (first > 0) pending.RemoveRange(0, first);
+                    int first = FindStartCode(0);
+                    if (first < 0) { head = Math.Max(head, tail - 3); continue; }
+                    head += first;
                     aligned = true;
                 }
 
                 // Process complete NALs (those terminated by the next start code).
                 while (true)
                 {
-                    int next = FindStartCode(pending, 3);
+                    int next = FindStartCode(3);
                     if (next < 0) break; // current NAL not complete yet
 
-                    // NAL = pending[0..next)
-                    int scLen = (pending[2] == 1) ? 3 : 4; // 00 00 01 or 00 00 00 01
+                    // NAL = buf[head .. head+next)
+                    int scLen = (buf[head + 2] == 1) ? 3 : 4; // 00 00 01 or 00 00 00 01
                     if (next < scLen + 1) { // malformed, drop
-                        pending.RemoveRange(0, next);
+                        head += next;
                         continue;
                     }
 
-                    int nalType = pending[scLen] & 0x1F;
+                    int nalType = buf[head + scLen] & 0x1F;
                     bool isVcl = nalType is >= 1 and <= 5;
                     bool isAud = nalType == 9;
                     bool isParamSet = nalType is 7 or 8; // SPS / PPS
@@ -205,7 +250,7 @@ public sealed class ScreenStreamer : IDisposable
                     // slices have first_mb_in_slice > 0 and stay in the same AU.
                     bool firstSliceOfPicture = isVcl
                         && next > scLen + 1
-                        && (pending[scLen + 1] & 0x80) != 0;
+                        && (buf[head + scLen + 1] & 0x80) != 0;
 
                     // A new access unit begins at an access-unit delimiter, at the
                     // first slice of a new picture, or at a parameter set that
@@ -214,20 +259,25 @@ public sealed class ScreenStreamer : IDisposable
                         (isAud || firstSliceOfPicture || isParamSet);
 
                     if (startsNewAu)
-                        EmitAu(keyframe: ContainsKeyframe(au));
+                        EmitAu();
 
                     // Append this NAL (with its start code) to the current AU.
-                    for (int k = 0; k < next; k++) au.Add(pending[k]);
+                    au.Write(buf, head, next);
                     if (isVcl) auHasVcl = true;
+                    if (nalType == 5) auHasIdr = true; // IDR slice => keyframe AU
 
-                    pending.RemoveRange(0, next);
+                    head += next;
                 }
 
                 // Safety valve: never let pending grow unbounded (bad stream).
-                if (pending.Count > (4 << 20))
+                if (tail - head > (4 << 20))
                 {
-                    pending.Clear();
+                    head = 0;
+                    tail = 0;
                     aligned = false;
+                    au.SetLength(0);
+                    auHasVcl = false;
+                    auHasIdr = false;
                 }
             }
         }
@@ -235,36 +285,6 @@ public sealed class ScreenStreamer : IDisposable
         {
             Console.WriteLine($"[stream] read loop error: {ex.Message}");
         }
-    }
-
-    private static bool ContainsKeyframe(List<byte> au)
-    {
-        for (int i = 0; i + 4 < au.Count; i++)
-        {
-            if (au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 1)
-            {
-                int type = au[i + 3] & 0x1F;
-                if (type == 5) return true;
-            }
-        }
-        return false;
-    }
-
-    /// <summary>Finds the index of the next 00 00 01 start code at or after <paramref name="from"/>.</summary>
-    private static int FindStartCode(List<byte> buf, int from)
-    {
-        for (int i = Math.Max(0, from); i + 3 <= buf.Count; i++)
-        {
-            if (buf[i] == 0 && buf[i + 1] == 0 && buf[i + 2] == 1)
-                return i;
-        }
-        return -1;
-    }
-
-    private static void TrimHead(List<byte> buf, int keepFrom)
-    {
-        if (keepFrom > 0 && keepFrom <= buf.Count)
-            buf.RemoveRange(0, keepFrom);
     }
 
     public void Dispose()

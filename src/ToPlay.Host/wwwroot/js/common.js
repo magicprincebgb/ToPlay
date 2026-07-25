@@ -22,6 +22,14 @@ export async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, opts);
   let data = null;
   try { data = await res.json(); } catch { /* no body */ }
+
+  // Session expired or was revoked: instead of leaving the user on a page
+  // where every action silently fails, clear the stale token and return to
+  // the sign-in screen. (Login itself legitimately returns 401 on bad creds.)
+  if (res.status === 401 && getToken() && path !== '/api/login') {
+    setToken(null);
+    location.replace('/login.html');
+  }
   return { status: res.status, ok: res.ok, data };
 }
 

@@ -49,8 +49,8 @@ public sealed class AuthService
             return new AuthResult(false, "Username must be 3-32 characters.");
         if (!username.All(c => char.IsLetterOrDigit(c) || c is '_' or '-' or '.'))
             return new AuthResult(false, "Username may only contain letters, digits, _ - .");
-        if (password.Length < 4)
-            return new AuthResult(false, "Password must be at least 4 characters.");
+        if (password.Length < 8)
+            return new AuthResult(false, "Password must be at least 8 characters.");
         if (_users.FindByUsername(username) != null)
             return new AuthResult(false, "That username is already taken.");
 
@@ -89,6 +89,7 @@ public sealed class AuthService
         }
 
         _throttle.TryRemove(clientKey, out _);
+        SweepExpiredSessions();
 
         var session = new Session(
             NewToken(),
@@ -136,6 +137,19 @@ public sealed class AuthService
     public void Logout(string? token)
     {
         if (!string.IsNullOrEmpty(token)) _sessions.TryRemove(token, out _);
+    }
+
+    /// <summary>
+    /// Drops sessions past their expiry so stale tokens don't linger in memory
+    /// forever (they were only evicted lazily when someone presented them).
+    /// Called on each successful login — cheap, and logins are rare.
+    /// </summary>
+    private void SweepExpiredSessions()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var (token, session) in _sessions)
+            if (session.ExpiresUtc < now)
+                _sessions.TryRemove(token, out _);
     }
 
     public bool DeleteUser(long id)

@@ -92,6 +92,7 @@ async function start() {
   setStatus('Connecting…');
 
   try { await requestFullscreen(); } catch { /* iOS: relies on PWA standalone */ }
+  acquireWakeLock();
 
   // The auth token rides in the WebSocket subprotocol (not the URL) so it
   // never lands in server request logs. Must match the server's WsAuthProtocol.
@@ -221,6 +222,7 @@ function teardown() {
   stopPing();
   closeKbd();
   hideSoundNudge();
+  releaseWakeLock();
   // Cancel any pending auto-reconnect so an INTENTIONAL bounce (toggling PC
   // sound, applying settings, quitting) can never race with a second reconnect
   // — that race used to reset gotVideo and spuriously trip the audio→video
@@ -351,6 +353,22 @@ async function requestFullscreen() {
   // iOS Safari has no element fullscreen; PWA "Add to Home Screen" gives it.
 }
 
+// ---------------------------------------------------------------- wake lock
+// Keep the phone's display awake while streaming. Watching a stream generates
+// long touch-free stretches, so without this the screen dims and locks
+// mid-game. Re-acquired on return from background (the OS releases it there).
+let wakeLock = null;
+async function acquireWakeLock() {
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* unsupported/denied */ }
+}
+function releaseWakeLock() {
+  try { wakeLock?.release(); } catch {}
+  wakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && started) acquireWakeLock();
+});
+
 // ---------------------------------------------------------------- touch input
 function sendEvents(events) {
   if (dc && dc.readyState === 'open' && events.length) {
@@ -377,15 +395,40 @@ function normalize(clientX, clientY) {
   return { nx, ny };
 }
 
+// Coalesce MOVE events to one batch per display frame: modern phones sample
+// touch at 120–240 Hz, and sending every sample as its own message only queues
+// work ahead of the video. The latest position per finger is what matters.
+// Down/up flush immediately (pending moves first) so taps stay exact.
+const pendingMoves = new Map(); // touch id -> latest move event
+let moveFlushScheduled = false;
+
+function flushMoves() {
+  moveFlushScheduled = false;
+  if (pendingMoves.size === 0) return;
+  const events = [...pendingMoves.values()];
+  pendingMoves.clear();
+  sendEvents(events);
+}
+
+function queueMove(ev) {
+  pendingMoves.set(ev.id, ev);
+  if (!moveFlushScheduled) {
+    moveFlushScheduled = true;
+    requestAnimationFrame(flushMoves);
+  }
+}
+
 function handleTouch(type, e) {
   if (!started) return;
   e.preventDefault();
   const events = [];
   for (const t of e.changedTouches) {
     const { nx, ny } = normalize(t.clientX, t.clientY);
-    events.push({ t: type, id: t.identifier, x: +nx.toFixed(4), y: +ny.toFixed(4) });
+    const ev = { t: type, id: t.identifier, x: +nx.toFixed(4), y: +ny.toFixed(4) };
+    if (type === 'm') queueMove(ev);
+    else events.push(ev);
   }
-  sendEvents(events);
+  if (events.length) { flushMoves(); sendEvents(events); }
 }
 
 stage.addEventListener('touchstart',  (e) => handleTouch('d', e), { passive: false });
@@ -396,8 +439,8 @@ stage.addEventListener('touchcancel', (e) => handleTouch('u', e), { passive: fal
 // Also support mouse for testing on a desktop browser.
 let mouseDown = false;
 stage.addEventListener('mousedown', (e) => { if (!started) return; mouseDown = true; const { nx, ny } = normalize(e.clientX, e.clientY); sendEvents([{ t: 'd', id: -1, x: nx, y: ny }]); });
-stage.addEventListener('mousemove', (e) => { if (!started || !mouseDown) return; const { nx, ny } = normalize(e.clientX, e.clientY); sendEvents([{ t: 'm', id: -1, x: nx, y: ny }]); });
-window.addEventListener('mouseup',  () => { if (!started || !mouseDown) return; mouseDown = false; sendEvents([{ t: 'u', id: -1 }]); });
+stage.addEventListener('mousemove', (e) => { if (!started || !mouseDown) return; const { nx, ny } = normalize(e.clientX, e.clientY); queueMove({ t: 'm', id: -1, x: nx, y: ny }); });
+window.addEventListener('mouseup',  () => { if (!started || !mouseDown) return; mouseDown = false; flushMoves(); sendEvents([{ t: 'u', id: -1 }]); });
 
 // Release everything if the page is hidden/backgrounded.
 document.addEventListener('visibilitychange', () => {
@@ -500,9 +543,11 @@ async function openSettings() {
   if (!ok) { setStatusEl.textContent = 'Could not load status.'; return; }
 
   setStatusEl.textContent = data.message || '';
-  selPreset.innerHTML = data.presets.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  // Build <option>s via the DOM (not innerHTML) so labels can never be
+  // interpreted as markup.
+  selPreset.replaceChildren(...data.presets.map(p => new Option(p.name, p.id)));
   selPreset.value = data.activePresetId;
-  selMonitor.innerHTML = data.monitors.map(m => `<option value="${m.index}">${m.label}</option>`).join('');
+  selMonitor.replaceChildren(...data.monitors.map(m => new Option(m.label, m.index)));
   selMonitor.value = data.monitorIndex;
   selEncoder.value = data.encoder || 'Auto';
   selAudio.value = audioEnabled ? 'on' : 'off';

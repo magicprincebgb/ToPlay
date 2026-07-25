@@ -7,10 +7,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>ToPlay.Host</RootNamespace>
     <AssemblyName>ToPlay.Host</AssemblyName>
-    <Version>1.0.2</Version>
-    <AssemblyVersion>1.0.2.0</AssemblyVersion>
-    <FileVersion>1.0.2.0</FileVersion>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
     <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Performance: server GC suits a streaming workload (steady allocation
+         from frame parsing/packetization) far better than workstation GC —
+         fewer, faster background collections mean fewer frame-time spikes. -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
 
     <!-- This host is Windows 10 (1507)+ only; touch injection & desktop
          duplication are Windows-specific. Suppress the platform-compat

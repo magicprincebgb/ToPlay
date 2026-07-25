@@ -18,6 +18,7 @@ form.addEventListener('submit', async (e) => {
   msg.textContent = '';
   msg.className = 'msg';
   go.disabled = true;
+  go.textContent = 'Signing in…';
 
   try {
     const { ok, data } = await api('/api/login', { method: 'POST', body: { username, password } });
@@ -33,5 +34,6 @@ form.addEventListener('submit', async (e) => {
     msg.className = 'msg error';
   } finally {
     go.disabled = false;
+    go.textContent = 'Sign in';
   }
 });
