@@ -16,7 +16,13 @@ powerful PC while you touch‑control it from your phone.
   **Keys** button) that types straight into the focused app/field on the PC.
 - **Live latency readout:** a colour‑coded round‑trip **ping** meter in the
   corner shows your real input lag at a glance (green under 60 ms) — measured on
-  the very data channel your touches travel over.
+  the very data channel your touches travel over — next to the **live fps** the
+  phone is actually decoding.
+- **Tuned for competitive play:** touch events are sent the instant they happen
+  (never batched), the phone's video buffer is pinned to its minimum, the encoder
+  runs with zero look‑ahead and no B‑frames, and the host asks Windows for 1 ms
+  timers so nothing waits for the next clock tick. See §5 for the full list.
+
 
 
 - **Accounts:** created **on the PC**, used to **log in from phones** on the LAN.
@@ -155,8 +161,9 @@ can't self‑register.
 Open the on‑screen **Settings** panel (gear button on the right) from the player.
 You can switch:
 
-- **Quality preset** — 720p60, 1080p60, 1080p30, or Native/60. Lower = less latency
-  & bandwidth.
+- **Quality preset** — 540p60 (esports), 720p60, 1080p60, 1080p30, or Native/60.
+  Lower = less latency & bandwidth.
+
 - **Encoder** — Auto, NVENC, QuickSync, AMF, or Software. If one doesn't work on
   your machine, just pick another; Auto falls back down the list automatically.
 - **PC sound** — turn **PC → phone audio** on or off (default **off**, video
@@ -192,10 +199,45 @@ Changes are saved to `data/config.json` and the encoder hot‑restarts.
 - **Signaling:** a tiny WebSocket endpoint (`/ws/signal`) exchanges the SDP
   offer/answer and ICE candidates. LAN‑only, so no STUN/TURN is needed.
 - **Input:** the browser sends touch events on a reliable WebRTC **DataChannel**;
-  the host injects them via `InitializeTouchInjection`/`InjectTouchInput`, so games
-  see genuine Windows touch contacts (with a keep‑alive so holds don't drop).
+  the host injects them via the Windows synthetic‑pointer API, so games see
+  genuine touch contacts (with a keep‑alive so holds don't drop).
+
+### Built for low latency (what ToPlay does for competitive play)
+
+Every stage between your finger and the pixels was tuned to remove waiting, not
+to look prettier:
+
+- **Touches are sent immediately.** No animation‑frame batching, which would have
+  added up to a full frame (8–16 ms) to every single drag. If the link is
+  genuinely congested, stale *move* events are dropped instead of queued — taps
+  and releases are never dropped.
+- **The phone's video buffer is pinned to its minimum** (`jitterBufferTarget` /
+  `playoutDelayHint` = 0). Browsers default to holding 50–200 ms of decoded video
+  to smooth out internet jitter; on a LAN that is pure, invisible input lag.
+- **Encoder tuned for now, not for filesize:** no B‑frames (each one costs a whole
+  frame of delay), no look‑ahead, no scene‑cut detection, CBR, and the picture
+  format the GPU encoders want natively (NV12 — no per‑frame conversion). NVENC
+  uses `p1 + ull` (its lowest‑latency mode), AMF `ultralowlatency`, QuickSync
+  `low_power 0` with `async_depth 1`.
+- **Frames never queue on the PC.** Capture output is read on a dedicated,
+  above‑normal‑priority thread that hands each finished frame straight to WebRTC,
+  instead of a thread‑pool slot shared with the web server.
+- **1 ms Windows timers.** By default Windows wakes threads on a ~15.6 ms tick, so
+  a frame finished just after a tick waits for the next one. ToPlay raises the
+  timer resolution while it runs (and hands it back on exit).
+- **No GC hiccups.** Server GC plus sustained‑low‑latency mode keeps garbage
+  collection out of the frame path, so you don't get the occasional freeze.
+- **A 540p60 "esports" preset.** Fewer, smaller packets spend less time queued in
+  a busy router — usually the real cause of sudden lag spikes mid‑match.
+- **You can see both numbers** (ping *and* decoded fps) live in the HUD, so it's
+  obvious whether a bad moment was the network or the encoder.
+
+**Tips for the lowest possible lag:** use **5 GHz** Wi‑Fi (or the PC on Ethernet),
+stand near the router, pick **540p60/720p60**, leave **PC sound off** (audio adds
+its own buffering), and prefer a **hardware encoder** over Software.
 
 ### Project layout
+
 ```
 src/ToPlay.Host/          the streaming server (ToPlay.Host.exe)
   Program.cs              ASP.NET host, endpoints, WebSocket signaling

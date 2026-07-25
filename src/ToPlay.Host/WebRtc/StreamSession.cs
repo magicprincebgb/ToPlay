@@ -287,16 +287,64 @@ public sealed class StreamSession : IDisposable
 
 
 
+    /// <summary>
+    /// How long the host may spend producing an answer before it gives up. Kept
+    /// well inside the phone's own patience so the player never has to sit on a
+    /// black screen waiting for us.
+    /// </summary>
+    private static readonly TimeSpan AnswerDeadline = TimeSpan.FromSeconds(3);
+
     /// <summary>Accepts the browser's SDP offer and returns our SDP answer.</summary>
     public async Task<string?> AcceptOfferAsync(string offerSdp)
     {
+        bool wantAudio = _audio != null && ContainsAudioMedia(offerSdp);
+        Console.WriteLine($"[webrtc:{_id}] offer received (PC sound requested: {(wantAudio ? "yes" : "no")}).");
+
+        // Building the answer is synchronous work inside the WebRTC stack, and
+        // with an extra audio track in play it can stall. Running it inline froze
+        // the whole signalling connection with it — ICE candidates included — so
+        // the phone stared at a black screen until its own watchdog gave up
+        // seconds later. Now it runs off the signalling loop under a hard
+        // deadline: if anything stalls we say "no" at once and the phone drops
+        // straight back to video-only instead of freezing.
+        var work = Task.Run(() => BuildAnswerAsync(offerSdp, wantAudio));
+        var winner = await Task.WhenAny(work, Task.Delay(AnswerDeadline)).ConfigureAwait(false);
+
+        if (winner != work)
+        {
+            Console.WriteLine($"[webrtc:{_id}] no answer after {AnswerDeadline.TotalSeconds:0.#}s" +
+                              (wantAudio ? " with PC sound — falling back to video only." : " — giving up."));
+            _audioEnabled = false;
+            return null;
+        }
+
+        try
+        {
+            return await work.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[webrtc:{_id}] negotiation failed: {ex.Message}");
+            _audioEnabled = false;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The handshake itself. Every step logs how long it took, so if the WebRTC
+    /// stack ever stalls again the host log says exactly where.
+    /// </summary>
+    private async Task<string?> BuildAnswerAsync(string offerSdp, bool wantAudio)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
         // PC->phone audio is opt-in: the phone only puts an m=audio line in its
         // offer when the user turned "PC sound" on. We must add our matching
         // send-only Opus track BEFORE setRemoteDescription so it lands in the
         // same BUNDLE group and gets answered. With the toggle OFF there is no
         // m=audio, we add nothing, and the video-only path is byte-for-byte
         // unchanged.
-        if (_audio != null && ContainsAudioMedia(offerSdp))
+        if (wantAudio)
         {
             try
             {
@@ -307,6 +355,7 @@ public sealed class StreamSession : IDisposable
                     MediaStreamStatusEnum.SendOnly);
                 _pc.addTrack(audioTrack);
                 _audioEnabled = true;
+                Console.WriteLine($"[webrtc:{_id}] audio track attached ({sw.ElapsedMilliseconds} ms).");
             }
             catch (Exception ex)
             {
@@ -321,24 +370,22 @@ public sealed class StreamSession : IDisposable
             type = RTCSdpType.offer,
             sdp = offerSdp
         });
+        Console.WriteLine($"[webrtc:{_id}] offer applied: {setResult} ({sw.ElapsedMilliseconds} ms).");
 
         if (setResult != SetDescriptionResultEnum.OK)
         {
             Console.WriteLine($"[webrtc:{_id}] setRemoteDescription failed: {setResult}");
+            _audioEnabled = false;
             return null;
         }
 
-        RTCSessionDescriptionInit answer;
-        try
-        {
-            answer = _pc.createAnswer(null);
-            await _pc.setLocalDescription(answer);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[webrtc:{_id}] createAnswer failed: {ex.Message}");
-            return null;
-        }
+        // Anything thrown from here is reported by the caller (which then falls
+        // back to video-only), together with the step timings printed above.
+        var answer = _pc.createAnswer(null);
+        Console.WriteLine($"[webrtc:{_id}] answer created ({sw.ElapsedMilliseconds} ms).");
+
+        await _pc.setLocalDescription(answer).ConfigureAwait(false);
+        Console.WriteLine($"[webrtc:{_id}] answer ready ({sw.ElapsedMilliseconds} ms).");
 
         // A/V sync note: both tracks are paced to real time — video advances by a
         // fixed RTP duration per frame at the real capture FPS, and audio advances
@@ -367,6 +414,7 @@ public sealed class StreamSession : IDisposable
             {
                 Console.WriteLine($"[webrtc:{_id}] PC sound broke the negotiation " +
                                   $"(video={video}, audio={audio}, input={data}); retrying video-only.");
+                _audioEnabled = false;
                 return null;
             }
         }

@@ -3,7 +3,87 @@
 All notable changes to **ToPlay** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] — 2026-07-25
+
+**The competitive gaming release.** Nothing new to learn and nothing to
+reconfigure — ToPlay just responds faster. Every change below removes waiting
+somewhere between your finger and the pixels on your phone. Drop-in upgrade;
+accounts and settings carry over.
+
+### Fixed — PC sound no longer costs you a black screen
+- **Turning PC sound on could leave the phone black for about eight seconds**
+  before it gave up and switched itself back to video only. The PC was getting
+  stuck while agreeing the sound connection, and because it got stuck in the
+  middle of the conversation with the phone, nothing else could get through
+  either — no picture, no touch, no explanation.
+- **The PC can no longer get stuck there.** Setting up the connection now runs
+  on its own with a three-second limit. If anything takes too long, the PC says
+  so straight away and the phone starts playing in video-only mode
+  immediately — you get the game, not a black screen.
+- **The phone stops waiting sooner too:** four seconds instead of eight, so if
+  something is wrong you find out (and are already playing) while you're still
+  looking at the screen.
+- **The PC log now shows every step of the handshake with its timing**
+  (`offer received`, `audio track attached`, `offer applied`, `answer created`,
+  `answer ready`), so if sound ever misbehaves on your hardware, the log points
+  straight at the step that misbehaved instead of going silent.
+
+### Faster touch response
+- **Touches are sent the moment they happen.** They used to be bundled up and
+  released once per animation frame, which was efficient but added up to **8–16 ms
+  to every single drag** — exactly the delay you feel when a skill shot lands late.
+  Each event now goes out immediately.
+- **Congestion is handled without adding lag.** If the connection is genuinely
+  backed up, stale *move* events are dropped instead of queued behind each other.
+  Taps and releases are never dropped, so a finger can't get stuck down.
+
+### Faster picture
+- **The phone no longer sits on already-decoded video.** Browsers hold a buffer of
+  received video (50–200 ms on Chrome/Android) to smooth out internet jitter. On
+  your own Wi-Fi there is nothing to smooth, so that buffer was pure invisible
+  input lag. ToPlay now asks for the smallest buffer the browser allows and paints
+  frames as they arrive. **This is the single biggest improvement in this release.**
+- **The encoder stopped working ahead of itself.** B-frames (each one costs a whole
+  frame of delay), look-ahead and scene-cut detection are all off, and the stream
+  is strict constant-bitrate. NVIDIA runs in its lowest-latency mode (`p1`+`ull`),
+  AMD in `ultralowlatency`, Intel with a single-deep pipeline.
+- **No more per-frame colour conversion on GPU encoders.** Frames are captured in
+  the exact format NVENC/QuickSync/AMF want (NV12), so the encoder no longer
+  converts every single frame before compressing it.
+- **Frames leave the PC without queueing.** Capture output is now read on its own
+  dedicated, prioritised thread that hands each finished frame straight to the
+  connection, instead of sharing a slot with the web server's work.
+
+### Steadier frame pacing (fewer random stutters)
+- **1 ms timers while ToPlay runs.** Windows normally wakes threads on a ~15.6 ms
+  tick, so a frame that finished just after a tick waited for the next one. The
+  timer resolution is raised at startup and politely handed back on exit, so your
+  battery life is unaffected once ToPlay closes.
+- **Garbage collection kept out of the video path**, which removes the occasional
+  freeze that had no obvious cause.
+- **The host is scheduled promptly** (above-normal priority) so background updaters
+  and indexers can't make your stream wait — the game itself is untouched.
+
+### New
+- **540p60 "esports / weak wifi" preset.** Fewer, smaller packets spend less time
+  queued inside a busy router, which is usually the real cause of those sudden
+  lag spikes mid-match. The picture is softer; the response is sharper. Existing
+  installs get the new preset automatically without losing their own settings.
+- **Live fps in the HUD**, right next to the ping — now you can tell instantly
+  whether a bad moment was the network (ping spike) or the PC (fps drop).
+- **Encoder options are verified against the bundled ffmpeg before release**
+  (`scripts/probe-encoder-args.ps1`), so a bad flag can never ship as a black
+  screen on someone's phone.
+
+### Documentation
+- New README section explaining exactly what makes ToPlay fast, plus a short list
+  of practical tips for the lowest possible lag (5 GHz Wi-Fi, 540p60/720p60, PC
+  sound off, hardware encoder).
+
+---
+
 ## [2.0.1] — 2026-07-25
+
 
 A fix release for three reported problems: **PC sound killing the picture and
 touch**, the **“Not secure” warning on iPhone**, and the **missing icon when

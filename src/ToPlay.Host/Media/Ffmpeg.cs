@@ -191,29 +191,51 @@ public static class Ffmpeg
             ? $"scale=-2:{preset.Height}:flags=fast_bilinear,"
             : string.Empty;
 
+        // Hardware encoders consume NV12 natively; handing them yuv420p forces an
+        // extra colour conversion inside the encoder on every single frame. Only
+        // libx264 actually wants planar yuv420p.
+        bool hardware = codec is "h264_nvenc" or "h264_qsv" or "h264_amf";
+        string pixFmt = hardware ? "nv12" : "yuv420p";
+
+        // Every option here exists to remove a frame of delay:
+        //   -bf 0          no B-frames: a B-frame cannot be encoded until the
+        //                  NEXT frame arrives, so it costs a full frame of lag.
+        //                  x264's zerolatency tune sets this, but QSV and AMF
+        //                  happily use B-frames unless told not to.
+        //   lookahead 0    the encoder must never hold frames back to plan ahead.
+        //   ull / ultralowlatency
+        //                  the vendors' lowest-latency rate-control mode.
+        //   no-scenecut    a scene change must not silently insert an IDR (and a
+        //                  bitrate spike) mid-fight.
         string encoderOpts = codec switch
         {
-            "h264_nvenc"  => $"-preset p1 -tune ll -rc cbr -zerolatency 1 -delay 0 -forced-idr 1",
-            "h264_qsv"    => $"-preset veryfast -low_power 0 -async_depth 1",
-            "h264_amf"    => $"-usage lowlatency -rc cbr -quality speed",
-            _             => $"-preset ultrafast -tune zerolatency -x264-params \"nal-hrd=cbr:repeat-headers=1\"",
+            "h264_nvenc"  => "-preset p1 -tune ull -rc cbr -zerolatency 1 -delay 0 -forced-idr 1 "
+                           + "-rc-lookahead 0 -no-scenecut 1 -bf 0",
+            "h264_qsv"    => "-preset veryfast -low_power 0 -async_depth 1 -look_ahead 0 -bf 0",
+            "h264_amf"    => "-usage ultralowlatency -rc cbr -quality speed -preanalysis 0 -bf 0",
+            _             => "-preset ultrafast -tune zerolatency -bf 0 "
+                           + "-x264-params \"nal-hrd=cbr:repeat-headers=1:sliced-threads=1:sync-lookahead=0:rc-lookahead=0\"",
         };
 
         // gdigrab captures a rectangle of the virtual desktop at an offset.
         // "-fflags nobuffer -flags low_delay" keep ffmpeg from queueing frames
         // on the input side — every buffered frame is glass-to-glass latency.
+        // "-thread_queue_size 4" caps the capture->encoder handoff queue: a deep
+        // queue hides jitter by adding delay, which is exactly the wrong trade
+        // for competitive play (better to drop a frame than to play it late).
         return string.Join(' ',
             "-hide_banner -loglevel warning -nostats",
-            "-fflags nobuffer -flags low_delay",
-            $"-f gdigrab -framerate {fps} -draw_mouse 1",
+            "-fflags nobuffer -flags low_delay -avioflags direct",
+            $"-f gdigrab -framerate {fps} -draw_mouse 1 -thread_queue_size 4",
             $"-offset_x {monitor.X} -offset_y {monitor.Y}",
             $"-video_size {monitor.Width}x{monitor.Height} -i desktop",
-            $"-vf \"{scale}format=yuv420p\"",
+            $"-vf \"{scale}format={pixFmt}\"",
             $"-c:v {codec} {encoderOpts}",
             $"-b:v {bitrate}k -maxrate {bitrate}k -bufsize {bitrate / 2}k",
-            $"-g {gop} -keyint_min {fps} -pix_fmt yuv420p",
+            $"-g {gop} -keyint_min {fps} -pix_fmt {pixFmt}",
             "-bsf:v h264_metadata=aud=insert",
             "-f h264 -"                       // Annex-B elementary stream to stdout
         );
+
     }
 }

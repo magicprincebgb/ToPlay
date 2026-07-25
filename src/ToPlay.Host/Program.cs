@@ -16,6 +16,13 @@ using ToPlay.Host.WebRtc;
 // ffmpeg captures the whole screen and touch coordinates map 1:1.
 ToPlay.Host.Display.Dpi.EnablePerMonitorV2();
 
+// Ask Windows for game-grade timing (1 ms timers, low-pause GC, prompt
+// scheduling) before any frame or touch is handled. Restored on exit so the
+// machine goes back to its power-saving defaults.
+LatencyTuning.Apply();
+AppDomain.CurrentDomain.ProcessExit += (_, _) => LatencyTuning.Restore();
+
+
 var dataDir = Path.Combine(AppContext.BaseDirectory, "data");
 Directory.CreateDirectory(dataDir);
 

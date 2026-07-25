@@ -26,13 +26,19 @@ public sealed class QualityPreset
     public int Fps { get; set; } = 60;
     public int BitrateKbps { get; set; } = 8000;
 
+    // Ordered from lowest latency to highest quality. "540p60" exists for
+    // competitive play on a busy Wi-Fi network: fewer, smaller packets spend
+    // less time queued in the router, which is usually what causes those sudden
+    // spikes of input lag mid-match. The picture is softer, the response is not.
     public static QualityPreset[] Defaults() =>
     [
-        new() { Id = "720p60",  Name = "720p 60fps (lowest latency)", Height = 720,  Fps = 60, BitrateKbps = 8000 },
+        new() { Id = "540p60",  Name = "540p 60fps (esports / weak wifi)", Height = 540, Fps = 60, BitrateKbps = 4000 },
+        new() { Id = "720p60",  Name = "720p 60fps (recommended)",    Height = 720,  Fps = 60, BitrateKbps = 8000 },
         new() { Id = "1080p60", Name = "1080p 60fps",                 Height = 1080, Fps = 60, BitrateKbps = 15000 },
         new() { Id = "1080p30", Name = "1080p 30fps (smoother wifi)", Height = 1080, Fps = 30, BitrateKbps = 10000 },
         new() { Id = "native60",Name = "Native res 60fps",           Height = 0,    Fps = 60, BitrateKbps = 20000 },
     ];
+
 }
 
 /// <summary>
@@ -77,8 +83,10 @@ public sealed class HostConfig
                 if (cfg != null)
                 {
                     if (cfg.Presets.Count == 0) cfg.Presets = QualityPreset.Defaults().ToList();
+                    else cfg.MergeNewDefaultPresets();
                     return cfg;
                 }
+
             }
         }
         catch (Exception ex)
@@ -91,12 +99,30 @@ public sealed class HostConfig
         return fresh;
     }
 
+    /// <summary>
+    /// Adds presets shipped with a newer version that this config file has never
+    /// seen, keeping the user's own edits and ordering intact. Without this an
+    /// upgraded install would silently miss new quality options, because the
+    /// preset list is persisted on first run.
+    /// </summary>
+    private void MergeNewDefaultPresets()
+    {
+        var known = Presets.Select(p => p.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var added = QualityPreset.Defaults().Where(d => !known.Contains(d.Id)).ToList();
+        if (added.Count == 0) return;
+
+        // New defaults go in front: they are the lower-latency options, and the
+        // list is presented to the user in this order.
+        Presets.InsertRange(0, added);
+    }
+
     public void Save(string path)
     {
         try
         {
             File.WriteAllText(path, JsonSerializer.Serialize(this, JsonOpts));
         }
+
         catch (Exception ex)
         {
             Console.WriteLine($"[config] Failed to save {path}: {ex.Message}");

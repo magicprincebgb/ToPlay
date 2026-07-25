@@ -24,8 +24,9 @@ public sealed class ScreenStreamer : IDisposable
 
     private Process? _proc;
     private CancellationTokenSource? _cts;
-    private Task? _readTask;
+    private Thread? _readThread;
     private int _viewers;
+
 
     private QualityPreset _preset;
     private MonitorInfo _monitor;
@@ -125,7 +126,19 @@ public sealed class ScreenStreamer : IDisposable
         };
         _proc.BeginErrorReadLine();
 
-        _readTask = Task.Run(() => ReadLoop(stdout, token), token);
+        // A dedicated thread, not the thread pool: every encoded frame is read
+        // AND handed to WebRTC on this thread, so it is the critical path for
+        // video latency. On the pool it would queue behind whatever else the
+        // web server is doing, and pool threads can't be prioritised. Above
+        // normal priority means a finished frame leaves the PC immediately.
+        _readThread = new Thread(() => ReadLoop(stdout, token))
+        {
+            Name = "toplay-frames",
+            IsBackground = true,
+            Priority = ThreadPriority.AboveNormal
+        };
+        _readThread.Start();
+
     }
 
     private void StopLocked()
@@ -142,7 +155,9 @@ public sealed class ScreenStreamer : IDisposable
 
         _cts?.Dispose();
         _cts = null;
+        _readThread = null; // ends on its own: the pipe closes with the process
     }
+
 
     // ---- Annex-B access-unit parser ---------------------------------------
 

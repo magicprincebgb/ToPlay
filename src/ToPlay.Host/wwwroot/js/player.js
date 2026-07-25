@@ -144,8 +144,10 @@ async function negotiate() {
     if (!videoStream.getVideoTracks().includes(e.track)) videoStream.addTrack(e.track);
     if (video.srcObject !== videoStream) video.srcObject = videoStream;
     video.play().catch(() => {});
+    minimizeLatency(e.receiver);
 
     showOverlay(false);
+
     showHud();
     flash('Streaming');
   };
@@ -187,6 +189,9 @@ function hasPicture() {
 
 function startWatchdog() {
   clearWatchdog();
+  // 4 s, not 8: the PC now always answers (or politely refuses) within 3 s, so
+  // anything still blank after this really is broken — and the fallback should
+  // kick in while you're still looking at the screen, not long after.
   watchdogTimer = setTimeout(() => {
     watchdogTimer = null;
     if (!started) return;
@@ -201,7 +206,7 @@ function startWatchdog() {
       return;
     }
     onDisconnected(picture ? 'Input unavailable' : 'No video from PC');
-  }, 8000);
+  }, 4000);
 }
 
 function clearWatchdog() {
@@ -307,10 +312,34 @@ function teardown() {
 }
 
 
+// ---------------------------------------------------------------- low latency
+// The browser holds received video in a jitter buffer before showing it. That
+// buffer is sized for smooth movie playback, so by default Chrome/Android can
+// sit on 50–200 ms of already-decoded picture — pure, invisible input lag in a
+// game. On a LAN there is almost no jitter to absorb, so we ask for the
+// smallest buffer the browser will give us and render frames the moment they
+// land. Every property here is optional and browser-specific (Safari has
+// neither), so each assignment is guarded: a missing feature must never break
+// the stream.
+function minimizeLatency(receiver) {
+  if (!receiver) return;
+  // Standards-track (Chrome 118+): target playout delay in seconds.
+  try { if ('jitterBufferTarget' in receiver) receiver.jitterBufferTarget = 0; } catch {}
+  // Legacy hint honoured by older Chrome/Edge builds.
+  try { receiver.playoutDelayHint = 0; } catch {}
+}
+
 // ---------------------------------------------------------------- latency HUD
 // Every second we bounce a tiny {t:'ping',ts} off the host; it echoes {t:'pong'}
 // with the same timestamp so we can show the real round-trip time. This is the
 // data-channel RTT — the same path touches take — so it reflects input lag.
+// The same tick samples WebRTC stats for the decoded frame rate, because a
+// healthy ping with a low fps still plays badly and the user deserves to see
+// which of the two is wrong.
+let fpsShown = 0;
+let lastFrames = 0;
+let lastFramesAt = 0;
+
 function startPing() {
   stopPing();
   pingEl.classList.add('show');
@@ -318,6 +347,7 @@ function startPing() {
     if (dc && dc.readyState === 'open') {
       try { dc.send(JSON.stringify({ t: 'ping', ts: Date.now() })); } catch {}
     }
+    sampleFps();
   };
   tick();
   pingTimer = setInterval(tick, 1000);
@@ -326,17 +356,36 @@ function startPing() {
 function stopPing() {
   clearInterval(pingTimer);
   pingTimer = null;
+  fpsShown = lastFrames = lastFramesAt = 0;
   pingEl.classList.remove('show');
   pingEl.textContent = '–';
   pingEl.className = pingEl.className.replace(/\bping-(good|ok|bad)\b/g, '').trim();
 }
 
+// Frames actually decoded per second, from the inbound video stats. Derived
+// from a delta so it stays accurate no matter how the interval drifts.
+async function sampleFps() {
+  if (!pc) return;
+  let stats;
+  try { stats = await pc.getStats(); } catch { return; }
+  stats.forEach((s) => {
+    if (s.type !== 'inbound-rtp' || s.kind !== 'video') return;
+    const frames = s.framesDecoded || 0;
+    const at = s.timestamp || Date.now();
+    const dt = (at - lastFramesAt) / 1000;
+    if (lastFramesAt && dt > 0.2) fpsShown = Math.round((frames - lastFrames) / dt);
+    lastFrames = frames;
+    lastFramesAt = at;
+  });
+}
+
 function showPing(rtt) {
-  pingEl.textContent = rtt + ' ms';
+  pingEl.textContent = fpsShown > 0 ? `${rtt} ms · ${fpsShown} fps` : `${rtt} ms`;
   const level = rtt < 60 ? 'ping-good' : rtt < 120 ? 'ping-ok' : 'ping-bad';
   pingEl.classList.remove('ping-good', 'ping-ok', 'ping-bad');
   pingEl.classList.add(level, 'show');
 }
+
 
 function onDataChannelMessage(ev) {
   let msg;
@@ -461,41 +510,37 @@ function normalize(clientX, clientY) {
   return { nx, ny };
 }
 
-// Coalesce MOVE events to one batch per display frame: modern phones sample
-// touch at 120–240 Hz, and sending every sample as its own message only queues
-// work ahead of the video. The latest position per finger is what matters.
-// Down/up flush immediately (pending moves first) so taps stay exact.
-const pendingMoves = new Map(); // touch id -> latest move event
-let moveFlushScheduled = false;
+// Touch events are sent the instant the browser hands them to us — never
+// deferred to the next animation frame. Waiting for rAF batches nicely but
+// costs up to a whole frame (8–16 ms) of input lag on EVERY drag, and in a
+// competitive game that delay is the difference between landing a skill shot
+// and missing it. One touchmove event already carries the latest position for
+// each finger that moved (e.changedTouches), so sending it straight away is
+// both the fastest and the smallest possible message.
+//
+// The only thing we guard against is a congested link: if the data channel is
+// already backed up, an extra MOVE would just queue behind stale ones and
+// arrive late, so we drop it. Downs and ups are never dropped — losing those
+// would strand a contact or miss a tap.
+const MOVE_BACKLOG_LIMIT = 8 * 1024;
 
-function flushMoves() {
-  moveFlushScheduled = false;
-  if (pendingMoves.size === 0) return;
-  const events = [...pendingMoves.values()];
-  pendingMoves.clear();
-  sendEvents(events);
-}
-
-function queueMove(ev) {
-  pendingMoves.set(ev.id, ev);
-  if (!moveFlushScheduled) {
-    moveFlushScheduled = true;
-    requestAnimationFrame(flushMoves);
-  }
+function movesAreBackedUp() {
+  return !!dc && dc.bufferedAmount > MOVE_BACKLOG_LIMIT;
 }
 
 function handleTouch(type, e) {
   if (!started) return;
   e.preventDefault();
+  if (type === 'm' && movesAreBackedUp()) return;
+
   const events = [];
   for (const t of e.changedTouches) {
     const { nx, ny } = normalize(t.clientX, t.clientY);
-    const ev = { t: type, id: t.identifier, x: +nx.toFixed(4), y: +ny.toFixed(4) };
-    if (type === 'm') queueMove(ev);
-    else events.push(ev);
+    events.push({ t: type, id: t.identifier, x: +nx.toFixed(4), y: +ny.toFixed(4) });
   }
-  if (events.length) { flushMoves(); sendEvents(events); }
+  sendEvents(events);
 }
+
 
 stage.addEventListener('touchstart',  (e) => handleTouch('d', e), { passive: false });
 stage.addEventListener('touchmove',   (e) => handleTouch('m', e), { passive: false });
@@ -505,8 +550,9 @@ stage.addEventListener('touchcancel', (e) => handleTouch('u', e), { passive: fal
 // Also support mouse for testing on a desktop browser.
 let mouseDown = false;
 stage.addEventListener('mousedown', (e) => { if (!started) return; mouseDown = true; const { nx, ny } = normalize(e.clientX, e.clientY); sendEvents([{ t: 'd', id: -1, x: nx, y: ny }]); });
-stage.addEventListener('mousemove', (e) => { if (!started || !mouseDown) return; const { nx, ny } = normalize(e.clientX, e.clientY); queueMove({ t: 'm', id: -1, x: nx, y: ny }); });
-window.addEventListener('mouseup',  () => { if (!started || !mouseDown) return; mouseDown = false; flushMoves(); sendEvents([{ t: 'u', id: -1 }]); });
+stage.addEventListener('mousemove', (e) => { if (!started || !mouseDown || movesAreBackedUp()) return; const { nx, ny } = normalize(e.clientX, e.clientY); sendEvents([{ t: 'm', id: -1, x: nx, y: ny }]); });
+window.addEventListener('mouseup',  () => { if (!started || !mouseDown) return; mouseDown = false; sendEvents([{ t: 'u', id: -1 }]); });
+
 
 // Release everything if the page is hidden/backgrounded.
 document.addEventListener('visibilitychange', () => {
