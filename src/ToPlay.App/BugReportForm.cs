@@ -12,6 +12,7 @@ namespace ToPlay.App;
 /// with the current session log and basic system info, saves a copy to disk,
 /// puts the full report on the clipboard, and opens the user's mail client
 /// (via mailto:) pre-addressed to the ToPlay maintainer.
+/// Styled with the same glassmorphism look as the Control Panel.
 /// </summary>
 public sealed class BugReportForm : Form
 {
@@ -26,26 +27,27 @@ public sealed class BugReportForm : Form
         _logText = logText ?? "";
         _appVersion = appVersion ?? "";
 
-        // ----- window chrome (matches the Control Panel dark theme) -----
+        // ----- window chrome (matches the Control Panel glassmorphism look) -----
         Text = "Report a bug";
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
-        ClientSize = new Size(560, 380);
-        BackColor = Color.FromArgb(11, 15, 23);
-        ForeColor = Color.FromArgb(230, 237, 247);
+        ClientSize = new Size(560, 386);
+        BackColor = Glass.GradBottom;
+        ForeColor = Glass.Text;
         Font = new Font("Segoe UI", 9f);
+        DoubleBuffered = true;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-
-        var accent = Color.FromArgb(31, 111, 235);
 
         var title = new Label
         {
             Text = "Report a bug",
-            Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+            Font = new Font("Segoe UI Semibold", 14f, FontStyle.Bold),
             Location = new Point(16, 14),
-            AutoSize = true
+            AutoSize = true,
+            ForeColor = Glass.Text,
+            BackColor = Color.Transparent
         };
         Controls.Add(title);
 
@@ -55,64 +57,80 @@ public sealed class BugReportForm : Form
                    "automatically so we can diagnose the problem.",
             Location = new Point(18, 50),
             AutoSize = true,
-            ForeColor = Color.FromArgb(138, 160, 192)
+            ForeColor = Glass.Muted,
+            BackColor = Color.Transparent
         };
         Controls.Add(blurb);
+
+        // frosted card holding the note field
+        var card = new GlassCard
+        {
+            Location = new Point(16, 92),
+            Size = new Size(528, 210)
+        };
+        Controls.Add(card);
 
         var lblWhat = new Label
         {
             Text = "What happened? (optional)",
-            Location = new Point(18, 96),
+            Location = new Point(16, 12),
             AutoSize = true,
-            ForeColor = Color.FromArgb(138, 160, 192)
+            ForeColor = Glass.Muted,
+            BackColor = Color.Transparent
         };
-        Controls.Add(lblWhat);
+        card.Controls.Add(lblWhat);
 
         _txtOpinion.Multiline = true;
         _txtOpinion.ScrollBars = ScrollBars.Vertical;
-        _txtOpinion.Location = new Point(18, 118);
-        _txtOpinion.Size = new Size(524, 170);
+        _txtOpinion.Location = new Point(16, 38);
+        _txtOpinion.Size = new Size(496, 156);
         _txtOpinion.BackColor = Color.FromArgb(6, 10, 16);
         _txtOpinion.ForeColor = Color.FromArgb(200, 214, 235);
         _txtOpinion.BorderStyle = BorderStyle.FixedSingle;
-        Controls.Add(_txtOpinion);
+        card.Controls.Add(_txtOpinion);
 
         var lblTo = new Label
         {
             Text = "Report goes to: " + ReportEmail,
-            Location = new Point(18, 300),
+            Location = new Point(18, 312),
             AutoSize = true,
-            ForeColor = Color.FromArgb(110, 130, 160)
+            ForeColor = Glass.Muted,
+            BackColor = Color.Transparent
         };
         Controls.Add(lblTo);
 
-        var btnSend = new Button
+        var btnSend = new GlassButton
         {
             Text = "Send report",
-            Location = new Point(300, 330),
+            Accent = true,
+            Location = new Point(300, 338),
             Size = new Size(140, 34),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Color.White,
-            BackColor = accent
+            Font = new Font("Segoe UI", 9f)
         };
-        btnSend.FlatAppearance.BorderSize = 0;
         btnSend.Click += (_, _) => Send();
         Controls.Add(btnSend);
 
-        var btnCancel = new Button
+        var btnCancel = new GlassButton
         {
             Text = "Cancel",
-            Location = new Point(450, 330),
+            Location = new Point(450, 338),
             Size = new Size(92, 34),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Color.White,
-            BackColor = Color.FromArgb(36, 49, 74),
+            Font = new Font("Segoe UI", 9f),
             DialogResult = DialogResult.Cancel
         };
-        btnCancel.FlatAppearance.BorderSize = 0;
         Controls.Add(btnCancel);
 
         CancelButton = btnCancel;
+    }
+
+    // gradient + accent glow behind everything (glassmorphism backdrop)
+    protected override void OnPaintBackground(PaintEventArgs e)
+        => Glass.PaintBackground(e.Graphics, ClientRectangle);
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Glass.ApplyModernChrome(this);
     }
 
     private void Send()

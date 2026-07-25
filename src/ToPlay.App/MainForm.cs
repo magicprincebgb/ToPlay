@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -22,6 +23,7 @@ namespace ToPlay.App;
 /// <summary>
 /// ToPlay Control Panel — the GUI shipped as ToPlay.exe. Starts/stops the
 /// streaming host, edits the main settings, shows the phone URL and a live log.
+/// Styled with a glassmorphism look (gradient background + frosted cards).
 /// </summary>
 public sealed class MainForm : Form
 {
@@ -80,143 +82,143 @@ public sealed class MainForm : Form
 
         // ----- window chrome -----
         Text = $"ToPlay — Control Panel  {AppVersion()}";
-
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(760, 764);
-        MinimumSize = new Size(660, 624);
-        BackColor = Color.FromArgb(11, 15, 23);
-        ForeColor = Color.FromArgb(230, 237, 247);
+        ClientSize = new Size(780, 824);
+        MinimumSize = new Size(720, 680);
+        BackColor = Glass.GradBottom;
+        ForeColor = Glass.Text;
         Font = new Font("Segoe UI", 9f);
+        DoubleBuffered = true;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-        var accent = Color.FromArgb(31, 111, 235);
-
-        // header
+        // ----- header -----
         var title = new Label
         {
             Text = "ToPlay",
-            Font = new Font("Segoe UI", 15f, FontStyle.Bold),
-            Location = new Point(16, 12),
-            AutoSize = true
+            Font = new Font("Segoe UI Semibold", 16f, FontStyle.Bold),
+            Location = new Point(24, 16),
+            AutoSize = true,
+            ForeColor = Glass.Text,
+            BackColor = Color.Transparent
         };
         Controls.Add(title);
+
+        var subtitle = new Label
+        {
+            Text = "Stream your PC to your phone",
+            Font = new Font("Segoe UI", 9f),
+            Location = new Point(26, 46),
+            AutoSize = true,
+            ForeColor = Glass.Muted,
+            BackColor = Color.Transparent
+        };
+        Controls.Add(subtitle);
 
         var version = new Label
         {
             Text = AppVersion(),
             Font = new Font("Segoe UI", 9f),
-            ForeColor = Color.FromArgb(110, 130, 160),
+            ForeColor = Glass.Muted,
             AutoSize = true,
+            BackColor = Color.Transparent,
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         Controls.Add(version);
-        version.Location = new Point(ClientSize.Width - version.PreferredWidth - 16, 24);
+        version.Location = new Point(ClientSize.Width - version.PreferredWidth - 22, 22);
 
-        _status.Text = "Stopped";
-
-        _status.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
-        _status.Location = new Point(120, 20);
+        _status.Text = "● Stopped";
+        _status.Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold);
         _status.AutoSize = true;
-        _status.ForeColor = Color.Gray;
+        _status.ForeColor = Color.FromArgb(150, 160, 175);
+        _status.BackColor = Color.Transparent;
+        _status.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         Controls.Add(_status);
+        _status.Location = new Point(ClientSize.Width - _status.PreferredWidth - 22, 44);
 
-        // phone URL
-        var lblUrl = new Label
-        {
-            Text = "Open on your phone (same Wi-Fi):",
-            Location = new Point(16, 52),
-            AutoSize = true,
-            ForeColor = Color.FromArgb(138, 160, 192)
-        };
-        Controls.Add(lblUrl);
+        // ===== card: phone URL =====
+        var cardConnect = MakeCard(20, 74, 740, 104);
+
+        MakeLabel(cardConnect, "Open on your phone (same Wi-Fi)", 20, 14, bold: true);
 
         _txtUrl.ReadOnly = true;
-        _txtUrl.Location = new Point(16, 72);
-        _txtUrl.Size = new Size(430, 26);
-        _txtUrl.Font = new Font("Consolas", 11f, FontStyle.Bold);
+        _txtUrl.Location = new Point(20, 44);
+        _txtUrl.Size = new Size(500, 32);
+        _txtUrl.Font = new Font("Consolas", 12f, FontStyle.Bold);
         _txtUrl.BackColor = Color.FromArgb(13, 19, 30);
-        _txtUrl.ForeColor = Color.FromArgb(63, 185, 80);
+        _txtUrl.ForeColor = Color.FromArgb(88, 210, 120);
         _txtUrl.BorderStyle = BorderStyle.FixedSingle;
         _txtUrl.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        Controls.Add(_txtUrl);
+        cardConnect.Controls.Add(_txtUrl);
 
-        var btnCopy = MakeButton("Copy", 456, 71, 70);
+        var btnCopy = MakeButton(cardConnect, "Copy", 532, 44, 80);
         btnCopy.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         btnCopy.Click += (_, _) => { try { Clipboard.SetText(_txtUrl.Text); Log("URL copied to clipboard."); } catch { } };
-        var btnOpen = MakeButton("Open here", 532, 71, 90);
+
+        var btnOpen = MakeButton(cardConnect, "Open here", 620, 44, 100);
         btnOpen.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         btnOpen.Click += (_, _) => OpenUrl(_txtUrl.Text.Replace("<your-pc-ip>", "localhost"));
 
-        // settings group
-        var grp = new GroupBox
-        {
-            Text = "Settings (restart the server to apply)",
-            Location = new Point(16, 110),
-            Size = new Size(728, 150),
-            ForeColor = Color.FromArgb(138, 160, 192),
-            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-        };
-        Controls.Add(grp);
+        // ===== card: settings =====
+        var cardSettings = MakeCard(20, 190, 740, 168);
 
-        grp.Controls.Add(MakeLabel("Quality", 14, 26));
+        MakeLabel(cardSettings, "Settings", 20, 12, bold: true);
+        MakeLabel(cardSettings, "(restart the server to apply)", 92, 13, muted: true);
+
+        MakeLabel(cardSettings, "Quality", 20, 42, muted: true);
         _cmbQuality.DropDownStyle = ComboBoxStyle.DropDownList;
-        _cmbQuality.Location = new Point(14, 46);
-        _cmbQuality.Size = new Size(220, 24);
-        grp.Controls.Add(_cmbQuality);
+        _cmbQuality.Location = new Point(20, 64);
+        _cmbQuality.Size = new Size(220, 26);
+        StyleCombo(_cmbQuality);
+        cardSettings.Controls.Add(_cmbQuality);
 
-        grp.Controls.Add(MakeLabel("Encoder", 250, 26));
+        MakeLabel(cardSettings, "Encoder", 256, 42, muted: true);
         _cmbEncoder.DropDownStyle = ComboBoxStyle.DropDownList;
-        _cmbEncoder.Location = new Point(250, 46);
-        _cmbEncoder.Size = new Size(200, 24);
+        _cmbEncoder.Location = new Point(256, 64);
+        _cmbEncoder.Size = new Size(200, 26);
         _cmbEncoder.Items.AddRange(Encoders);
-        grp.Controls.Add(_cmbEncoder);
+        StyleCombo(_cmbEncoder);
+        cardSettings.Controls.Add(_cmbEncoder);
 
-        grp.Controls.Add(MakeLabel("Monitor", 466, 26));
-        _numMonitor.Location = new Point(466, 46);
-        _numMonitor.Size = new Size(80, 24);
+        MakeLabel(cardSettings, "Monitor", 472, 42, muted: true);
+        _numMonitor.Location = new Point(472, 64);
+        _numMonitor.Size = new Size(90, 26);
         _numMonitor.Minimum = 0;
         _numMonitor.Maximum = Math.Max(0, Screen.AllScreens.Length - 1);
-        grp.Controls.Add(_numMonitor);
+        StyleNumeric(_numMonitor);
+        cardSettings.Controls.Add(_numMonitor);
 
-        grp.Controls.Add(MakeLabel("HTTP port", 14, 82));
-        _numHttp.Location = new Point(14, 102);
-        _numHttp.Size = new Size(100, 24);
+        MakeLabel(cardSettings, "HTTP port", 20, 102, muted: true);
+        _numHttp.Location = new Point(20, 124);
+        _numHttp.Size = new Size(100, 26);
         _numHttp.Minimum = 1; _numHttp.Maximum = 65535;
-        grp.Controls.Add(_numHttp);
+        StyleNumeric(_numHttp);
+        cardSettings.Controls.Add(_numHttp);
 
-        grp.Controls.Add(MakeLabel("HTTPS port", 130, 82));
-        _numHttps.Location = new Point(130, 102);
-        _numHttps.Size = new Size(100, 24);
+        MakeLabel(cardSettings, "HTTPS port", 136, 102, muted: true);
+        _numHttps.Location = new Point(136, 124);
+        _numHttps.Size = new Size(100, 26);
         _numHttps.Minimum = 1; _numHttps.Maximum = 65535;
-        grp.Controls.Add(_numHttps);
+        StyleNumeric(_numHttps);
+        cardSettings.Controls.Add(_numHttps);
 
         _chkHttps.Text = "Use HTTPS (required for iPhone)";
-        _chkHttps.Location = new Point(250, 104);
-        _chkHttps.AutoSize = true;
-        _chkHttps.ForeColor = Color.FromArgb(230, 237, 247);
-        grp.Controls.Add(_chkHttps);
+        _chkHttps.Location = new Point(256, 126);
+        StyleCheck(_chkHttps);
+        cardSettings.Controls.Add(_chkHttps);
 
-        var btnSave = new Button
-        {
-            Text = "Save",
-            Location = new Point(574, 100),
-            Size = new Size(140, 30),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Color.White,
-            BackColor = accent
-        };
-        btnSave.FlatAppearance.BorderSize = 0;
+        var btnSave = MakeButton(cardSettings, "Save", 560, 120, 160, accent: true);
+        btnSave.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         btnSave.Click += (_, _) => SaveSettings();
-        grp.Controls.Add(btnSave);
 
-        // control buttons
-        _btnStart = MakeButton("Start server", 16, 272, 130);
-        _btnStart.BackColor = accent;
-        _btnStop = MakeButton("Stop", 154, 272, 90);
-        _btnRestart = MakeButton("Restart", 252, 272, 90);
-        _btnRebuild = MakeButton("Rebuild", 350, 272, 90);
-        _btnSetup = MakeButton("First-time setup", 448, 272, 130);
-        _btnAccounts = MakeButton("Accounts", 586, 272, 120);
+        // ===== card: server controls + startup / actions =====
+        var cardControls = MakeCard(20, 370, 740, 134);
+
+        _btnStart = MakeButton(cardControls, "Start server", 20, 16, 120, accent: true);
+        _btnStop = MakeButton(cardControls, "Stop", 150, 16, 84);
+        _btnRestart = MakeButton(cardControls, "Restart", 242, 16, 96);
+        _btnRebuild = MakeButton(cardControls, "Rebuild", 346, 16, 96);
+        _btnSetup = MakeButton(cardControls, "First-time setup", 450, 16, 140);
+        _btnAccounts = MakeButton(cardControls, "Accounts", 598, 16, 122);
 
         _btnStart.Click += async (_, _) => await EnsureAndStartAsync();
         _btnStop.Click += (_, _) => StopServer();
@@ -225,45 +227,43 @@ public sealed class MainForm : Form
         _btnSetup.Click += async (_, _) => await FirstTimeSetupAsync();
         _btnAccounts.Click += (_, _) => OpenAccounts();
 
-        // second row: auto-start (+ sub-option) + certificate + bug report
+        // auto-start (+ indented sub-option)
         _chkAutostart.Text = "Start ToPlay when I sign in to Windows";
-        _chkAutostart.Location = new Point(18, 316);
-        _chkAutostart.AutoSize = true;
-        _chkAutostart.ForeColor = Color.FromArgb(230, 237, 247);
+        _chkAutostart.Location = new Point(20, 66);
+        StyleCheck(_chkAutostart);
         _chkAutostart.CheckedChanged += (_, _) =>
         {
             if (!_suppressAutostart) SetAutostart(_chkAutostart.Checked);
             _chkAutostartServer.Enabled = _chkAutostart.Checked;
         };
-        Controls.Add(_chkAutostart);
+        cardControls.Controls.Add(_chkAutostart);
 
-        // sub-option (indented): also bring the streaming server up at sign-in
         _chkAutostartServer.Text = "Also start the streaming server automatically";
-        _chkAutostartServer.Location = new Point(38, 340);
-        _chkAutostartServer.AutoSize = true;
-        _chkAutostartServer.ForeColor = Color.FromArgb(138, 160, 192);
+        _chkAutostartServer.Location = new Point(40, 92);
+        StyleCheck(_chkAutostartServer, muted: true);
         _chkAutostartServer.CheckedChanged += (_, _) =>
         {
             if (_suppressAutostart) return;
             SetAutostartServer(_chkAutostartServer.Checked);
         };
-        Controls.Add(_chkAutostartServer);
+        cardControls.Controls.Add(_chkAutostartServer);
 
-        _btnCert = MakeButton("Certificate", 470, 314, 130);
+        _btnCert = MakeButton(cardControls, "Certificate", 470, 78, 120);
         _btnCert.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _btnCert.Click += (_, _) => InstallCertificate();
 
-        _btnBug = MakeButton("Report a bug", 608, 314, 136);
+        _btnBug = MakeButton(cardControls, "Report a bug", 598, 78, 122);
         _btnBug.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _btnBug.Click += (_, _) => { using var f = new BugReportForm(_txtLog.Text, AppVersion()); f.ShowDialog(this); };
 
-        // log
+        // ===== log =====
         var lblLog = new Label
         {
             Text = "Log",
-            Location = new Point(16, 376),
+            Location = new Point(24, 516),
             AutoSize = true,
-            ForeColor = Color.FromArgb(138, 160, 192)
+            ForeColor = Glass.Muted,
+            BackColor = Color.Transparent
         };
         Controls.Add(lblLog);
 
@@ -271,11 +271,10 @@ public sealed class MainForm : Form
         _txtLog.ReadOnly = true;
         _txtLog.ScrollBars = ScrollBars.Vertical;
         _txtLog.WordWrap = false;
-        _txtLog.Location = new Point(16, 396);
-        _txtLog.Size = new Size(728, ClientSize.Height - 396 - 16);
-
+        _txtLog.Location = new Point(20, 538);
+        _txtLog.Size = new Size(740, ClientSize.Height - 538 - 20);
         _txtLog.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-        _txtLog.BackColor = Color.FromArgb(6, 10, 16);
+        _txtLog.BackColor = Color.FromArgb(8, 12, 20);
         _txtLog.ForeColor = Color.FromArgb(200, 214, 235);
         _txtLog.Font = new Font("Consolas", 9f);
         _txtLog.BorderStyle = BorderStyle.FixedSingle;
@@ -302,7 +301,6 @@ public sealed class MainForm : Form
         Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) HideToTray(); };
 
         Load += (_, _) =>
-
         {
             LoadSettingsIntoUi();
             RefreshUrl();
@@ -332,34 +330,82 @@ public sealed class MainForm : Form
         };
 
         FormClosing += MainForm_FormClosing;
+    }
 
+    // gradient + accent glow behind everything (glassmorphism backdrop)
+    protected override void OnPaintBackground(PaintEventArgs e)
+        => Glass.PaintBackground(e.Graphics, ClientRectangle);
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        Glass.ApplyModernChrome(this);
     }
 
 
     // ======================= helpers: UI factories =======================
-    private Button MakeButton(string text, int x, int y, int w)
+    private GlassCard MakeCard(int x, int y, int w, int h)
     {
-        var b = new Button
+        var card = new GlassCard
+        {
+            Location = new Point(x, y),
+            Size = new Size(w, h),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+        };
+        Controls.Add(card);
+        return card;
+    }
+
+    private static GlassButton MakeButton(Control parent, string text, int x, int y, int w, bool accent = false)
+    {
+        var b = new GlassButton
         {
             Text = text,
+            Accent = accent,
             Location = new Point(x, y),
             Size = new Size(w, 34),
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Color.White,
-            BackColor = Color.FromArgb(36, 49, 74)
+            Font = new Font("Segoe UI", 9f, FontStyle.Regular)
         };
-        b.FlatAppearance.BorderSize = 0;
-        Controls.Add(b);
+        parent.Controls.Add(b);
         return b;
     }
 
-    private static Label MakeLabel(string text, int x, int y) => new()
+    private static Label MakeLabel(Control parent, string text, int x, int y, bool bold = false, bool muted = false)
     {
-        Text = text,
-        Location = new Point(x, y),
-        AutoSize = true,
-        ForeColor = Color.FromArgb(138, 160, 192)
-    };
+        var l = new Label
+        {
+            Text = text,
+            Location = new Point(x, y),
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            ForeColor = muted ? Glass.Muted : Glass.Text,
+            Font = new Font("Segoe UI", 9f, bold ? FontStyle.Bold : FontStyle.Regular)
+        };
+        parent.Controls.Add(l);
+        return l;
+    }
+
+    private static void StyleCombo(ComboBox c)
+    {
+        c.FlatStyle = FlatStyle.Flat;
+        c.BackColor = Glass.Input;
+        c.ForeColor = Glass.Text;
+    }
+
+    private static void StyleNumeric(NumericUpDown n)
+    {
+        n.BorderStyle = BorderStyle.FixedSingle;
+        n.BackColor = Glass.Input;
+        n.ForeColor = Glass.Text;
+    }
+
+    private static void StyleCheck(CheckBox c, bool muted = false)
+    {
+        c.AutoSize = true;
+        c.BackColor = Color.Transparent;
+        c.FlatStyle = FlatStyle.Standard;
+        c.ForeColor = muted ? Glass.Muted : Glass.Text;
+    }
 
     /// <summary>Returns the app version formatted as "vMAJOR.MINOR.PATCH".</summary>
     private static string AppVersion()
@@ -952,8 +998,9 @@ public sealed class MainForm : Form
     private void SetStatus(string text, Color color)
     {
         if (InvokeRequired) { BeginInvoke(new Action(() => SetStatus(text, color))); return; }
-        _status.Text = text;
+        _status.Text = "● " + text;
         _status.ForeColor = color;
+        _status.Location = new Point(ClientSize.Width - _status.PreferredWidth - 22, 44);
     }
 
     // ======================= system tray =======================
