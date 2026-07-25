@@ -21,6 +21,14 @@ internal static class Program
             return;
         }
 
-        Application.Run(new MainForm());
+        // Launched by the "auto-start at logon" scheduled task: start hidden in
+        // the system tray and bring the streaming server up automatically.
+        bool startMinimized = args.Any(a =>
+               a.Equals("--autostart", StringComparison.OrdinalIgnoreCase)
+            || a.Equals("/autostart", StringComparison.OrdinalIgnoreCase)
+            || a.Equals("--tray", StringComparison.OrdinalIgnoreCase));
+
+        Application.Run(new MainForm(startMinimized));
+
     }
 }

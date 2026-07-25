@@ -51,15 +51,22 @@ public sealed class MainForm : Form
     private readonly CheckBox _chkHttps = new();
     private readonly TextBox _txtLog = new();
     private readonly Button _btnStart, _btnStop, _btnRestart, _btnRebuild, _btnSetup, _btnAccounts;
+    private readonly Button _btnCert;
+    private readonly Button _btnBug;
+    private readonly CheckBox _chkAutostart = new();
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly NotifyIcon _tray = new();
     private bool _trayHintShown;
+    private bool _suppressAutostart;
+    private bool _forceExit;
+    private readonly bool _startMinimized;
 
 
     private static readonly string[] Encoders = { "Auto", "Nvenc", "QuickSync", "Amf", "Software" };
 
-    public MainForm()
+    public MainForm(bool startMinimized = false)
     {
+        _startMinimized = startMinimized;
         _isAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent())
             .IsInRole(WindowsBuiltInRole.Administrator);
 
@@ -74,8 +81,8 @@ public sealed class MainForm : Form
         Text = $"ToPlay — Control Panel  {AppVersion()}";
 
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(760, 700);
-        MinimumSize = new Size(660, 560);
+        ClientSize = new Size(760, 740);
+        MinimumSize = new Size(660, 600);
         BackColor = Color.FromArgb(11, 15, 23);
         ForeColor = Color.FromArgb(230, 237, 247);
         Font = new Font("Segoe UI", 9f);
@@ -217,11 +224,31 @@ public sealed class MainForm : Form
         _btnSetup.Click += async (_, _) => await FirstTimeSetupAsync();
         _btnAccounts.Click += (_, _) => OpenAccounts();
 
+        // second row: auto-start + certificate + bug report
+        _chkAutostart.Text = "Start ToPlay when I sign in to Windows";
+        _chkAutostart.Location = new Point(18, 320);
+        _chkAutostart.AutoSize = true;
+        _chkAutostart.ForeColor = Color.FromArgb(230, 237, 247);
+        _chkAutostart.CheckedChanged += (_, _) =>
+        {
+            if (_suppressAutostart) return;
+            SetAutostart(_chkAutostart.Checked);
+        };
+        Controls.Add(_chkAutostart);
+
+        _btnCert = MakeButton("Certificate", 470, 314, 130);
+        _btnCert.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _btnCert.Click += (_, _) => InstallCertificate();
+
+        _btnBug = MakeButton("Report a bug", 608, 314, 136);
+        _btnBug.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _btnBug.Click += (_, _) => { using var f = new BugReportForm(_txtLog.Text, AppVersion()); f.ShowDialog(this); };
+
         // log
         var lblLog = new Label
         {
             Text = "Log",
-            Location = new Point(16, 316),
+            Location = new Point(16, 352),
             AutoSize = true,
             ForeColor = Color.FromArgb(138, 160, 192)
         };
@@ -231,8 +258,9 @@ public sealed class MainForm : Form
         _txtLog.ReadOnly = true;
         _txtLog.ScrollBars = ScrollBars.Vertical;
         _txtLog.WordWrap = false;
-        _txtLog.Location = new Point(16, 336);
-        _txtLog.Size = new Size(728, 336);
+        _txtLog.Location = new Point(16, 372);
+        _txtLog.Size = new Size(728, ClientSize.Height - 372 - 16);
+
         _txtLog.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
         _txtLog.BackColor = Color.FromArgb(6, 10, 16);
         _txtLog.ForeColor = Color.FromArgb(200, 214, 235);
@@ -272,17 +300,19 @@ public sealed class MainForm : Form
                     : "WARNING: ToPlay.Host.exe was not found next to this app.");
             if (!File.Exists(_toolsFfmpeg) && !OnPath("ffmpeg.exe"))
                 Log("ffmpeg not found yet — click \"First-time setup\" once.");
+
+            _suppressAutostart = true;
+            _chkAutostart.Checked = IsAutostartEnabled();
+            _suppressAutostart = false;
+
+            if (_startMinimized)
+                BeginInvoke(new Action(async () => { HideToTray(); await EnsureAndStartAsync(); }));
         };
 
-        FormClosing += (_, _) =>
-        {
-            StopServer();
-            _timer.Stop();
-            _tray.Visible = false;
-            _tray.Dispose();
-        };
+        FormClosing += MainForm_FormClosing;
 
     }
+
 
     // ======================= helpers: UI factories =======================
     private Button MakeButton(string text, int x, int y, int w)
@@ -731,6 +761,137 @@ public sealed class MainForm : Form
         catch (Exception ex) { Log($"{file} error: {ex.Message}"); }
     }
 
+    private int RunForExitCode(string file, string args)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(file, args)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using var p = Process.Start(psi);
+            if (p == null) return -1;
+            p.WaitForExit(15000);
+            return p.ExitCode;
+        }
+        catch (Exception ex) { Log($"{file} error: {ex.Message}"); return -1; }
+    }
+
+    // ======================= auto-start at logon =======================
+    private const string AutostartTaskName = "ToPlay Autostart";
+
+    private bool IsAutostartEnabled()
+        => RunForExitCode("schtasks", $"/query /tn \"{AutostartTaskName}\"") == 0;
+
+    private void SetAutostart(bool enable)
+    {
+        if (!_isAdmin)
+        {
+            Log("Not elevated — cannot change auto-start. Re-launch ToPlay as Administrator.");
+            _suppressAutostart = true;
+            _chkAutostart.Checked = IsAutostartEnabled();
+            _suppressAutostart = false;
+            return;
+        }
+
+        if (enable)
+        {
+            var exe = Application.ExecutablePath;
+            // An "onlogon" task with highest run level starts ToPlay elevated at
+            // sign-in without a UAC prompt (ToPlay itself requires administrator).
+            var rc = RunForExitCode("schtasks",
+                $"/create /tn \"{AutostartTaskName}\" /tr \"\\\"{exe}\\\" --autostart\" /sc onlogon /rl highest /f");
+            Log(rc == 0
+                ? "Auto-start enabled — ToPlay will launch (minimized to the tray) when you sign in to Windows."
+                : "Could not enable auto-start (schtasks returned " + rc + ").");
+        }
+        else
+        {
+            var rc = RunForExitCode("schtasks", $"/delete /tn \"{AutostartTaskName}\" /f");
+            Log(rc == 0 ? "Auto-start disabled." : "Auto-start was already off.");
+        }
+    }
+
+    // ======================= certificate (trust like Sunshine) =======================
+    private void InstallCertificate()
+    {
+        var caCrt = Path.Combine(_dataDir, "toplay-ca.crt");
+        if (!File.Exists(caCrt))
+        {
+            Log("Certificate not created yet — click \"Start server\" once (ToPlay generates and trusts it automatically), then try again.");
+            MessageBox.Show(this,
+                "ToPlay hasn't created its certificate yet.\n\n" +
+                "Start the server once — the certificate is generated and trusted automatically — then click \"Certificate\" again.",
+                "Certificate", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (_isAdmin)
+        {
+            // Sunshine-style: install the CA into the machine-wide Trusted Root store.
+            var rc = RunForExitCode("certutil", $"-addstore -f Root \"{caCrt}\"");
+            Log(rc == 0
+                ? "Certificate installed into this PC's Trusted Root store — browsers here trust ToPlay with no warning."
+                : "certutil returned " + rc + " (the server also trusts the certificate automatically on start).");
+        }
+        else
+        {
+            Log("Not elevated — the server trusts the certificate automatically when it runs as Administrator.");
+        }
+
+        string? savedTo = null;
+        try
+        {
+            var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            savedTo = Path.Combine(desktop, "ToPlay-Certificate.crt");
+            File.Copy(caCrt, savedTo, true);
+            Log("Saved a copy for your phone to: " + savedTo);
+        }
+        catch (Exception ex) { Log("Could not copy the certificate to the Desktop: " + ex.Message); }
+
+        var cfg = ReadConfig();
+        var ip = PrimaryLanIp() ?? "<your-pc-ip>";
+        var httpPort = ReadInt(cfg, "HttpPort", 8080);
+        var caUrl = $"http://{ip}:{httpPort}/toplay-ca.crt";
+
+        MessageBox.Show(this,
+            "This PC now trusts ToPlay's certificate.\n\n" +
+            "To remove the \"Not secure\" warning on your phone, open this address in your " +
+            "phone's browser once and install the certificate:\n\n" + caUrl +
+            (savedTo != null ? "\n\nA copy was also saved to your Desktop (ToPlay-Certificate.crt)." : ""),
+            "Certificate", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    // ======================= safe close =======================
+    private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
+    {
+        // If the server is still streaming and the user clicks the window's X,
+        // offer to keep it running in the tray instead of quitting outright.
+        if (!_forceExit && _proc is { HasExited: false } && e.CloseReason == CloseReason.UserClosing)
+        {
+            var choice = MessageBox.Show(this,
+                "The ToPlay server is still running.\n\n" +
+                "•  Yes  —  Minimize to the tray and keep streaming (recommended)\n" +
+                "•  No   —  Stop the server and quit ToPlay\n" +
+                "•  Cancel  —  Don't close",
+                "ToPlay is still running",
+                MessageBoxButtons.YesNoCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button1);
+
+            if (choice == DialogResult.Cancel) { e.Cancel = true; return; }
+            if (choice == DialogResult.Yes) { e.Cancel = true; HideToTray(); return; }
+            // No → fall through and shut everything down.
+        }
+
+        StopServer();
+        _timer.Stop();
+        _tray.Visible = false;
+        _tray.Dispose();
+    }
+
+
     // ======================= misc actions =======================
     private void OpenAccounts()
     {
@@ -775,7 +936,8 @@ public sealed class MainForm : Form
         Activate();
     }
 
-    private void ExitApp() => Close();
+    private void ExitApp() { _forceExit = true; Close(); }
+
 
 
     private void Pump()
