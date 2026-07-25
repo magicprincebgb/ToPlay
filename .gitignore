@@ -23,8 +23,17 @@ src/ToPlay.Installer/payload/
 Sunshine-master/
 /Sunshine-master/
 
-# Runtime data (accounts DB, config, generated TLS cert)
+# Runtime data (accounts DB, config, generated TLS cert) — created next to the
+# running executable, never in the source tree.
+# NOTE: git on Windows matches ignore rules case-insensitively, so "**/data/"
+# also swallowed the *source* folder src/ToPlay.Host/Data/ (UserStore.cs).
+# The negations below keep that source folder tracked.
 **/data/
+!src/ToPlay.Host/Data/
+!src/ToPlay.Host/Data/**
+*.db
+*.db-shm
+*.db-wal
 *.pfx
 
 # Bundled ffmpeg (downloaded by scripts/get-ffmpeg.ps1)

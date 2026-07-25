@@ -2,6 +2,12 @@
 
 export const TOKEN_KEY = 'toplay_token';
 
+// "Remember me" token. Unlike the session token this one survives a host
+// restart, and the host only ever stores a hash of it, so it cannot be replayed
+// from a stolen database. It is also swapped for a brand-new one every time it
+// is used, so a copied token stops working the moment the real device returns.
+export const REMEMBER_KEY = 'toplay_remember';
+
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -9,6 +15,15 @@ export function getToken() {
 export function setToken(t) {
   if (t) localStorage.setItem(TOKEN_KEY, t);
   else localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getRemember() {
+  return localStorage.getItem(REMEMBER_KEY);
+}
+
+export function setRemember(t) {
+  if (t) localStorage.setItem(REMEMBER_KEY, t);
+  else localStorage.removeItem(REMEMBER_KEY);
 }
 
 export function authHeaders(extra = {}) {
@@ -37,11 +52,43 @@ export function requireLogin() {
   if (!getToken()) location.replace('/login.html');
 }
 
+// Signing out is deliberate, so it also forgets this device: the host deletes
+// the remembered token and the next visit asks for the password again.
 export function logout() {
-  api('/api/logout', { method: 'POST' }).finally(() => {
+  const remember = getRemember();
+  api('/api/logout', { method: 'POST', body: { remember } }).finally(() => {
     setToken(null);
+    setRemember(null);
     location.replace('/login.html');
   });
+}
+
+// Trades a stored "Remember me" token for a fresh session, without asking for
+// the password. Returns true when we are signed in again. The host hands back a
+// replacement token every time, so we store the new one immediately; if the
+// token is unknown or expired we drop it and fall back to the normal form.
+export async function resumeSession() {
+  const remember = getRemember();
+  if (!remember) return false;
+  try {
+    const res = await fetch('/api/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ remember }),
+    });
+    let data = null;
+    try { data = await res.json(); } catch { /* no body */ }
+    if (res.ok && data?.ok && data.token) {
+      setToken(data.token);
+      setRemember(data.remember || null);
+      return true;
+    }
+    // 401 means the token is spent, revoked or expired — never keep it.
+    if (res.status === 401) setRemember(null);
+  } catch {
+    // Host unreachable: keep the token so it still works once it's back.
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------- PWA install

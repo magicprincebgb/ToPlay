@@ -2,6 +2,12 @@ import { api, getToken, logout, requireLogin, showInstallHelp } from '/js/common
 
 requireLogin();
 
+// The stored session may already be forgotten by the host (sessions live in
+// memory, so restarting the PC clears them). Ask once up front: if it's stale,
+// api() drops it and returns to the sign-in page — which can sign us straight
+// back in on a remembered device instead of retrying the stream forever.
+api('/api/me').catch(() => { /* offline: the normal reconnect flow handles it */ });
+
 // If opened in a normal browser tab (not the installed PWA), show how to add
 // ToPlay to the home screen for a proper full-screen experience.
 showInstallHelp();

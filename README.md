@@ -298,6 +298,14 @@ locked down even though it only runs on your LAN:
   expose these ports to the public internet.
 - **Passwords** are hashed with **BCrypt**; sessions are in‑memory bearer tokens
   that are dropped when the host exits.
+- **"Remember me" uses single‑use, rotating tokens.** The phone stores a
+  `selector.verifier` pair (16 + 32 random bytes); the host keeps only
+  `SHA‑256(verifier)` and compares it in constant time. Every successful resume
+  *deletes* the old row and issues a fresh token, so a captured token dies after
+  one use and a replay is rejected. Tokens expire after 30 days, are capped at 8
+  devices per account, are revoked on sign‑out and on account deletion, and live
+  in `localStorage` rather than a cookie (no CSRF surface). Failed resumes count
+  against the same login throttle as passwords.
 - **Login throttling + no username enumeration.** After several failed attempts a
   client is locked out briefly, and every login runs one BCrypt verify (a dummy
   hash when the user doesn't exist) so "bad user" and "bad password" take the same

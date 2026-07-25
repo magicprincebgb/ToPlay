@@ -64,6 +64,34 @@ input[type=text], input[type=password] {
   font-size: 16px;
 }
 
+/* "Remember me" — a checkbox sitting on the same line as its label, with a
+   comfortably large tap target for thumbs. */
+.remember-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 0;
+}
+.remember-row input[type=checkbox] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+.remember-row label {
+  display: inline;
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* While the app is signing itself back in with a remembered device, the form is
+   dimmed and inert instead of flashing empty fields. */
+.card.busy { opacity: .45; pointer-events: none; }
+
 button {
   cursor: pointer;
   border: none;

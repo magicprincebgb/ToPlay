@@ -3,6 +3,55 @@
 All notable changes to **ToPlay** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-07-26
+
+**No more typing your password every time you want to play.** Tick *Remember me*
+once and your phone signs itself in from then on — even after you restart the PC.
+Drop-in upgrade; accounts and settings carry over.
+
+### New — stay signed in on this device
+- **"Remember me on this device"** is now on the phone's sign-in page, ticked by
+  default. Sign in once and the next time you open ToPlay it takes you straight
+  to the play screen.
+- **It survives a PC restart.** Before, ToPlay forgot every sign-in the moment
+  the PC app closed, so you had to type your username and password again. Now
+  only the *play* session is temporary — the device itself stays trusted.
+- **Playing on someone else's phone?** Just untick the box before you sign in and
+  nothing is remembered.
+- **Tapping "Sign out" forgets the device immediately**, on the phone *and* on
+  the PC. Deleting an account from the PC's user list also forgets every phone
+  that account was signed in on.
+- **It expires by itself after 30 days** of not being used, so a phone you stop
+  using quietly loses access.
+- The sign-in page now shows the version it's actually running, instead of a
+  number that had to be edited by hand.
+
+### Security — how "Remember me" is kept safe
+- **Your password is never stored on the phone.** The phone keeps a long random
+  pass instead, and that pass is only good for one use.
+- **It is swapped for a brand-new one every single time it's used.** If someone
+  ever managed to copy an old one, it is already dead and the attempt is refused.
+- **The PC doesn't store the pass either** — only a scrambled fingerprint of it,
+  so even someone who reads ToPlay's data file can't sign in as you.
+- **Guessing is pointless.** A wrong pass counts against the same lock-out that
+  protects the password box, and it's checked in a way that leaks nothing about
+  the right answer.
+- **A limit of 8 remembered devices per account** stops old phones piling up
+  forever.
+
+### Fixed
+- **A stale sign-in no longer leaves the phone spinning.** If the PC had
+  forgotten your play session, the phone would keep retrying the connection
+  forever; it now returns to the sign-in page and signs itself straight back in.
+- **The public source now actually builds.** One file — the accounts database
+  code — was being skipped by an over-broad ignore rule (it lives in a folder
+  called `Data`, and the rule that hides ToPlay's *runtime* `data` folder matched
+  it too on Windows). Anyone cloning the repo got a project that wouldn't
+  compile. The released `ToPlaySetup.exe` was always complete; only the source
+  copy was affected.
+
+---
+
 ## [2.1.1] — 2026-07-25
 
 **Play anywhere, including on your phone's hotspot.** A small but important

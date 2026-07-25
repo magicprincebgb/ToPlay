@@ -227,16 +227,38 @@ Session? Current(HttpContext ctx) => auth.Validate(BearerToken(ctx));
 
 // ---- auth API --------------------------------------------------------------
 
+// The device label is only a convenience for the user; never trusted for auth.
+static string DeviceLabel(HttpContext ctx)
+{
+    var ua = ctx.Request.Headers.UserAgent.ToString();
+    return string.IsNullOrWhiteSpace(ua) ? "" : (ua.Length > 60 ? ua[..60] : ua);
+}
+
 app.MapPost("/api/login", (HttpContext ctx, LoginDto dto) =>
 {
     var clientKey = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
-    var result = auth.Login(dto.Username, dto.Password, clientKey);
+    var result = auth.Login(dto.Username, dto.Password, clientKey, dto.Remember, DeviceLabel(ctx));
     if (!result.Ok || result.Session is null)
         return Results.Json(new { ok = false, error = result.Error }, statusCode: 401);
 
     var s = result.Session;
-    return Results.Json(new { ok = true, token = s.Token, username = s.Username, isAdmin = s.IsAdmin });
+    return Results.Json(new { ok = true, token = s.Token, username = s.Username, isAdmin = s.IsAdmin, remember = result.Remember });
 });
+
+// "Remember me": swap a device's long-lived token for a fresh session, no
+// password needed. The token is rotated on every use, so the one just spent can
+// never be replayed. Rate-limited by the same throttle as /api/login.
+app.MapPost("/api/resume", (HttpContext ctx, ResumeDto dto) =>
+{
+    var clientKey = ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+    var result = auth.Resume(dto.Remember, clientKey, DeviceLabel(ctx));
+    if (!result.Ok || result.Session is null)
+        return Results.Json(new { ok = false, error = result.Error }, statusCode: 401);
+
+    var s = result.Session;
+    return Results.Json(new { ok = true, token = s.Token, username = s.Username, isAdmin = s.IsAdmin, remember = result.Remember });
+});
+
 
 app.MapGet("/api/me", (HttpContext ctx) =>
 {
@@ -246,11 +268,15 @@ app.MapGet("/api/me", (HttpContext ctx) =>
         : Results.Json(new { ok = true, username = s.Username, isAdmin = s.IsAdmin });
 });
 
-app.MapPost("/api/logout", (HttpContext ctx) =>
+// Signing out ends the session AND forgets this device, so "Remember me" can
+// never keep someone signed in after they explicitly asked to leave.
+app.MapPost("/api/logout", (HttpContext ctx, LogoutDto? dto) =>
 {
     auth.Logout(BearerToken(ctx));
+    auth.ForgetDevice(dto?.Remember);
     return Results.Json(new { ok = true });
 });
+
 
 // Account creation: allowed from the PC (loopback) or by an admin. The very
 // first account created becomes an admin automatically.
@@ -474,8 +500,11 @@ void PrintBanner(HostConfig cfg, string hotkeyDesc)
     Console.WriteLine();
 }
 
-sealed record LoginDto(string Username, string Password);
+sealed record LoginDto(string Username, string Password, bool Remember = false);
+sealed record ResumeDto(string? Remember);
+sealed record LogoutDto(string? Remember);
 sealed record RegisterDto(string Username, string Password, bool IsAdmin = false);
+
 sealed record SettingsDto(int? MonitorIndex, string? PresetId, string? Encoder);
 
 /// <summary>Tiny wrapper so we can capture the cert instance in a closure.</summary>
