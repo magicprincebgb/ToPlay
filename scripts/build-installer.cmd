@@ -80,7 +80,7 @@ echo [3/6] Publishing ToPlay.Host (self-contained)...
 "%DOTNET%" publish "src\ToPlay.Host\ToPlay.Host.csproj" -c Release -r %RID% %NOSRV% --self-contained true -o "%APPDIR%" --nologo
 if errorlevel 1 goto :fail
 
-echo [4/6] Publishing ToPlay.App -> ToPlay.exe (self-contained)...
+echo [4/6] Publishing ToPlay.App -^> ToPlay.exe (self-contained)...
 "%DOTNET%" publish "src\ToPlay.App\ToPlay.App.csproj" -c Release -r %RID% %NOSRV% --self-contained true -o "%APPDIR%" --nologo
 if errorlevel 1 goto :fail
 
@@ -99,7 +99,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 if errorlevel 1 goto :fail
 if not exist "%PAYLOAD%\app.zip" (echo Payload zip was not created. & goto :fail)
 
-echo [6/6] Publishing installer to ToPlaySetup.exe (single-file)...
+echo [6/6] Publishing installer -^> ToPlaySetup.exe (single-file)...
 
 "%DOTNET%" publish "src\ToPlay.Installer\ToPlay.Installer.csproj" -c Release -r %RID% %NOSRV% ^
   --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true ^

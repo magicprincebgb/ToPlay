@@ -3,6 +3,47 @@
 All notable changes to **ToPlay** are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [2.3.1] — 2026-07-26
+
+**Updates now check themselves, and stop failing on busy home networks.** The
+Control Panel header was also redrawn so the title and tagline can't touch.
+Drop-in upgrade; accounts and settings carry over.
+
+### Fixed — "couldn't check for updates" on a shared connection
+- **The update check no longer breaks when your household has been busy.**
+  GitHub allows a limited number of anonymous questions per hour *per internet
+  connection* — shared by every device and app on your Wi-Fi. Once that ran out,
+  ToPlay could only report *"GitHub is temporarily limiting update checks from
+  this network"*, even though nothing was wrong with ToPlay or your PC.
+- ToPlay now remembers GitHub's answer and asks *"has anything changed since
+  last time?"* — a question that doesn't count against the limit at all, so
+  repeated checks are effectively free.
+- And if the limit has already been reached, ToPlay falls back to reading the
+  public releases page, which isn't rationed. In practice the check now works
+  even when the old one had no attempts left.
+- When it genuinely has to wait, the message now tells you *when* — "it frees up
+  in about 8 minutes" — instead of a vague "try again in a few minutes".
+
+### New — ToPlay notices new versions on its own
+- **This is the "auto" part of auto-update.** A few seconds after the Control
+  Panel opens, ToPlay quietly looks for a newer release. Nothing pops up and
+  nothing downloads: if there's something new, the button simply relabels itself
+  to **Update to v2.3.2** (or whatever the version is) and a line appears in the
+  log. One click still does the whole install, exactly as before.
+- If the check fails — you're offline, or GitHub is busy — it stays silent and
+  just notes it in the log. It never interrupts a game.
+- Still nothing about you or your PC is ever sent, and updates are still only
+  ever installed when you choose to.
+
+### Fixed — the header no longer collides
+- **"ToPlay" and "Stream your PC to your phone" had grown into each other** by
+  about 5 pixels, which made the top of the window look cramped and slightly
+  blurred. The two lines are now positioned from their real measured height, so
+  they sit cleanly apart — and stay apart at 125 % / 150 % display scaling,
+  where the old fixed positions were the cause of the overlap.
+
+---
+
 ## [2.3.0] — 2026-07-26
 
 **ToPlay can now update itself.** There's a new **Check for updates** button in

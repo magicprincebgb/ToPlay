@@ -49,6 +49,12 @@ internal static class UpdateService
     private const string LatestReleaseApi =
         "https://api.github.com/repos/magicprincebgb/ToPlay/releases/latest";
 
+    /// <summary>The plain (non-API) page; it redirects to /releases/tag/vX.Y.Z.</summary>
+    private const string LatestReleasePage =
+        "https://github.com/magicprincebgb/ToPlay/releases/latest";
+
+    private const string ReleasesPage = "https://github.com/magicprincebgb/ToPlay/releases";
+
     private const string SetupAssetName = "ToPlaySetup.exe";
 
     /// <summary>The version of the ToPlay.exe that is running right now.</summary>
@@ -58,33 +64,151 @@ internal static class UpdateService
     /// <summary>
     /// Returns the newest release if it is newer than what's installed, or
     /// <c>null</c> when we're already up to date (or nothing is published yet).
+    ///
+    /// GitHub allows only 60 anonymous API calls per hour per IP address — a
+    /// budget every device on the same Wi-Fi shares — so this check is
+    /// deliberately frugal. It remembers the last answer together with its ETag
+    /// (GitHub then replies "304 Not Modified", which costs nothing from the
+    /// budget), and if the API is throttled or unreachable anyway it reads the
+    /// ordinary releases page instead, which isn't rationed at all.
     /// </summary>
     public static async Task<UpdateInfo?> CheckAsync(CancellationToken ct = default)
     {
+        JsonObject release;
+        try
+        {
+            release = await FetchLatestFromApiAsync(ct).ConfigureAwait(false);
+        }
+        catch (NoReleaseException) { return null; }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception apiError)
+        {
+            try
+            {
+                release = await FetchLatestFromWebsiteAsync(ct).ConfigureAwait(false);
+            }
+            catch (NoReleaseException) { return null; }
+            catch (OperationCanceledException) { throw; }
+            catch { throw apiError; }   // the API explained the problem best
+        }
+
+        return BuildInfo(release);
+    }
+
+    /// <summary>Asks the GitHub API, re-using the cached reply when nothing changed.</summary>
+    private static async Task<JsonObject> FetchLatestFromApiAsync(CancellationToken ct)
+    {
+        var cached = LoadCache();
+
         using var http = NewClient(TimeSpan.FromSeconds(20));
         using var req = new HttpRequestMessage(HttpMethod.Get, LatestReleaseApi);
         req.Headers.Accept.ParseAdd("application/vnd.github+json");
         req.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+        if (cached is { Etag.Length: > 0, Body.Length: > 0 })
+            req.Headers.TryAddWithoutValidation("If-None-Match", cached.Etag);
 
         using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct)
                                    .ConfigureAwait(false);
 
+        // Nothing new since last time — the cached release is still the latest.
+        if (resp.StatusCode == HttpStatusCode.NotModified && cached is not null)
+            return ParseRelease(cached.Body);
+
         // No releases published (yet) — nothing to update to.
-        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        if (resp.StatusCode == HttpStatusCode.NotFound) throw new NoReleaseException();
 
         // GitHub throttles anonymous callers per IP; say so in plain language.
         if (resp.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
-            throw new InvalidOperationException(
-                "GitHub is temporarily limiting update checks from this network. " +
-                "Please try again in a few minutes.");
+            throw new InvalidOperationException(RateLimitMessage(resp));
 
         resp.EnsureSuccessStatusCode();
 
         var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        if (JsonNode.Parse(body) is not JsonObject rel)
-            throw new InvalidOperationException("GitHub sent an update list we couldn't read.");
+        var release = ParseRelease(body);
 
+        var etag = resp.Headers.ETag?.ToString();
+        if (!string.IsNullOrWhiteSpace(etag)) SaveCache(etag!, body);
+
+        return release;
+    }
+
+    /// <summary>
+    /// Plan B when the API is rationed or blocked: <c>/releases/latest</c> on the
+    /// normal website answers with a redirect to <c>/releases/tag/vX.Y.Z</c>, so
+    /// the tag alone is enough to work out the release and its download links.
+    /// </summary>
+    private static async Task<JsonObject> FetchLatestFromWebsiteAsync(CancellationToken ct)
+    {
+        string? location;
+        using (var http = NewClient(TimeSpan.FromSeconds(20), followRedirects: false))
+        using (var req = new HttpRequestMessage(HttpMethod.Get, LatestReleasePage))
+        {
+            req.Headers.Accept.ParseAdd("text/html");
+            using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct)
+                                       .ConfigureAwait(false);
+
+            if (resp.StatusCode == HttpStatusCode.NotFound) throw new NoReleaseException();
+            location = resp.Headers.Location?.ToString();
+        }
+
+        if (string.IsNullOrEmpty(location))
+            throw new InvalidOperationException("GitHub didn't say which release is the latest one.");
+
+        var target = Uri.TryCreate(location, UriKind.Absolute, out var abs)
+            ? abs
+            : new Uri(new Uri(LatestReleasePage), location);
+        RequireTrusted(target.ToString());
+
+        const string marker = "/tag/";
+        var path = target.AbsolutePath.TrimEnd('/');
+        var at = path.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (at < 0) throw new NoReleaseException();          // repo has no releases yet
+
+        var tag = Uri.UnescapeDataString(path[(at + marker.Length)..]);
+        if (tag.Length == 0) throw new NoReleaseException();
+
+        var release = new JsonObject
+        {
+            ["tag_name"] = tag,
+            ["html_url"] = $"{ReleasesPage}/tag/{Uri.EscapeDataString(tag)}"
+        };
+
+        // Only bother looking up the installer when this really is an upgrade.
+        var version = ParseVersion(tag);
+        if (version is null || version <= Current) return release;
+
+        var setupUrl = $"{ReleasesPage}/download/{Uri.EscapeDataString(tag)}/{SetupAssetName}";
+        var assets = new JsonArray
+        {
+            new JsonObject
+            {
+                ["name"] = SetupAssetName,
+                ["browser_download_url"] = setupUrl,
+                ["size"] = await ContentLengthAsync(setupUrl, ct).ConfigureAwait(false)
+            }
+        };
+
+        var checksumUrl = setupUrl + ".sha256";
+        if (await ContentLengthAsync(checksumUrl, ct).ConfigureAwait(false) > 0)
+        {
+            assets.Add(new JsonObject
+            {
+                ["name"] = SetupAssetName + ".sha256",
+                ["browser_download_url"] = checksumUrl
+            });
+        }
+
+        release["assets"] = assets;
+        release["body"] =
+            $"What's new in {tag} is listed on the release page:\n{ReleasesPage}/tag/{tag}";
+        return release;
+    }
+
+    /// <summary>Turns GitHub's release object into an <see cref="UpdateInfo"/>.</summary>
+    private static UpdateInfo? BuildInfo(JsonObject rel)
+    {
         var tag = rel["tag_name"]?.GetValue<string>() ?? "";
+
         var latest = ParseVersion(tag);
         if (latest is null)
             throw new InvalidOperationException($"The latest release ({tag}) has an unexpected version number.");
@@ -275,11 +399,13 @@ internal static class UpdateService
 
     // ======================= helpers =======================
 
-    private static HttpClient NewClient(TimeSpan timeout)
+    private static HttpClient NewClient(TimeSpan timeout, bool followRedirects = true)
     {
         var handler = new HttpClientHandler
         {
-            AllowAutoRedirect = true,
+            // Redirects are followed everywhere except when we *want* to read the
+            // "Location" of /releases/latest to learn the newest tag.
+            AllowAutoRedirect = followRedirects,
             MaxAutomaticRedirections = 5,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
         };
@@ -289,6 +415,89 @@ internal static class UpdateService
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"ToPlay/{Current} (+https://github.com/magicprincebgb/ToPlay)");
         return http;
     }
+
+    private static JsonObject ParseRelease(string body) =>
+        JsonNode.Parse(body) as JsonObject
+        ?? throw new InvalidOperationException("GitHub sent an update list we couldn't read.");
+
+    /// <summary>
+    /// "Try again in about 12 minutes (after 13:45)" reads far better than
+    /// "try again later", and GitHub tells us exactly when the hour resets.
+    /// </summary>
+    private static string RateLimitMessage(HttpResponseMessage resp)
+    {
+        const string basic = "GitHub is temporarily limiting update checks from this network.";
+        try
+        {
+            if (resp.Headers.TryGetValues("x-ratelimit-reset", out var values)
+                && long.TryParse(values.FirstOrDefault(), out var unix))
+            {
+                var resets = DateTimeOffset.FromUnixTimeSeconds(unix).ToLocalTime();
+                var minutes = (int)Math.Ceiling((resets - DateTimeOffset.Now).TotalMinutes);
+                if (minutes is > 0 and <= 60)
+                    return $"{basic} It frees up in about {minutes} minute{(minutes == 1 ? "" : "s")} " +
+                           $"(at {resets:HH:mm}) — ToPlay will try again then.";
+            }
+        }
+        catch { /* fall through to the generic wording */ }
+
+        return basic + " Please try again in a few minutes.";
+    }
+
+    /// <summary>HEAD request: the file's size, or 0 when it isn't there.</summary>
+    private static async Task<long> ContentLengthAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            RequireTrusted(url);
+            using var http = NewClient(TimeSpan.FromSeconds(20));
+            using var req = new HttpRequestMessage(HttpMethod.Head, url);
+            using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct)
+                                       .ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) return 0;
+            RequireTrusted(resp.RequestMessage?.RequestUri?.ToString() ?? url);
+            return Math.Max(0, resp.Content.Headers.ContentLength ?? 0);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return 0; }
+    }
+
+    // ---- the last successful answer, so repeat checks cost no API quota ----
+
+    private sealed record ReleaseCache(string Etag, string Body);
+
+    private static string CachePath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ToPlay", "update-cache.json");
+
+    private static ReleaseCache? LoadCache()
+    {
+        try
+        {
+            if (!File.Exists(CachePath)) return null;
+            if (JsonNode.Parse(File.ReadAllText(CachePath)) is not JsonObject o) return null;
+
+            var etag = o["etag"]?.GetValue<string>();
+            var body = o["body"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(etag) || string.IsNullOrWhiteSpace(body)) return null;
+            return new ReleaseCache(etag!, body!);
+        }
+        catch { return null; }   // corrupt or unreadable — just ask GitHub again
+    }
+
+    private static void SaveCache(string etag, string body)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
+            var o = new JsonObject { ["etag"] = etag, ["body"] = body };
+            File.WriteAllText(CachePath, o.ToJsonString());
+        }
+        catch { /* a cache we can't write is only a missed optimisation */ }
+    }
+
+    /// <summary>Thrown when the repository simply has no published release.</summary>
+    private sealed class NoReleaseException : Exception;
 
     /// <summary>Throws unless the URL is HTTPS on a GitHub-owned host.</summary>
     private static void RequireTrusted(string url)

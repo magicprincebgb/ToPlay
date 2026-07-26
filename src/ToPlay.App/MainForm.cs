@@ -58,6 +58,8 @@ public sealed class MainForm : Form
     private readonly Button _btnUpdate;
     private readonly Label _lblUpdate;
     private bool _checkingUpdate;
+    private string _updateButtonText = "Check for updates";
+    private int _statusY = 44;                 // measured in the constructor
     private readonly CheckBox _chkAutostart = new();
     private readonly CheckBox _chkAutostartServer = new();
     private readonly System.Windows.Forms.Timer _timer = new();
@@ -95,22 +97,38 @@ public sealed class MainForm : Form
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
         // ----- header -----
+        // Every Y below is derived from the *measured* height of the line above
+        // it. The old fixed coordinates were tuned for 100 % scaling only, so at
+        // 125 % (or with a different UI font) the big "ToPlay" title grew down
+        // into the tagline and the two texts overlapped.
+        const int headerLeft = 24;
+        const int headerTop = 12;
+        const int lineGap = 4;
+
         var title = new Label
         {
             Text = "ToPlay",
             Font = new Font("Segoe UI Semibold", 16f, FontStyle.Bold),
-            Location = new Point(24, 16),
+            Location = new Point(headerLeft, headerTop),
             AutoSize = true,
             ForeColor = Glass.Text,
             BackColor = Color.Transparent
         };
         Controls.Add(title);
 
+        // Label.PreferredHeight bakes in ~5 px of internal padding, so stacking the
+        // tagline on it pushed it a further 5 px down — right onto the first card.
+        // Measure the tight glyph box for the *visual* gap, then take whichever is
+        // larger so the two label rectangles can never overlap either.
+        var titleTextH = TextRenderer.MeasureText(
+            title.Text, title.Font, new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Height;
+        var subtitleTop = headerTop + Math.Max(title.PreferredHeight, titleTextH + lineGap);
+
         var subtitle = new Label
         {
             Text = "Stream your PC to your phone",
             Font = new Font("Segoe UI", 9f),
-            Location = new Point(26, 46),
+            Location = new Point(headerLeft + 2, subtitleTop),
             AutoSize = true,
             ForeColor = Glass.Muted,
             BackColor = Color.Transparent
@@ -127,7 +145,7 @@ public sealed class MainForm : Form
             Anchor = AnchorStyles.Top | AnchorStyles.Right
         };
         Controls.Add(version);
-        version.Location = new Point(ClientSize.Width - version.PreferredWidth - 22, 22);
+        version.Location = new Point(ClientSize.Width - version.PreferredWidth - 22, headerTop + 4);
 
         _status.Text = "● Stopped";
         _status.Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold);
@@ -136,7 +154,10 @@ public sealed class MainForm : Form
         _status.BackColor = Color.Transparent;
         _status.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         Controls.Add(_status);
-        _status.Location = new Point(ClientSize.Width - _status.PreferredWidth - 22, 44);
+        // Remembered, because SetStatus() re-positions this label every time the
+        // text length changes and must not fall back to a stale hard-coded Y.
+        _statusY = version.Bottom + lineGap;
+        _status.Location = new Point(ClientSize.Width - _status.PreferredWidth - 22, _statusY);
 
         // ===== card: phone URL =====
         var cardConnect = MakeCard(20, 74, 740, 104);
@@ -336,6 +357,9 @@ public sealed class MainForm : Form
                     if (startServer) await EnsureAndStartAsync();
                 }));
             }
+
+            // Look for a new version by itself — quietly, in the background.
+            _ = AutoCheckUpdatesAsync();
         };
 
         FormClosing += MainForm_FormClosing;
@@ -1045,8 +1069,45 @@ public sealed class MainForm : Form
             if (!IsDisposed && !Disposing)
             {
                 _btnUpdate.Enabled = true;
-                _btnUpdate.Text = "Check for updates";
+                _btnUpdate.Text = _updateButtonText;
             }
+        }
+    }
+
+    /// <summary>
+    /// The automatic half of "auto update": a few seconds after the Control
+    /// Panel opens, ToPlay asks GitHub whether a newer release exists. It never
+    /// interrupts — no dialog, no popup, and a failed check (offline, or GitHub
+    /// rationing anonymous callers) only leaves a line in the log. When there is
+    /// something new, the button relabels itself to "Update to vX.Y.Z" so one
+    /// click installs it.
+    /// </summary>
+    private async Task AutoCheckUpdatesAsync()
+    {
+        try
+        {
+            // Let the window finish painting (and the server finish starting)
+            // before spending bandwidth on this.
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            if (IsDisposed || Disposing || _checkingUpdate) return;
+
+            var info = await UpdateService.CheckAsync();
+            if (info is null || IsDisposed || Disposing) return;
+
+            _updateButtonText = $"Update to v{info.Version}";
+            _btnUpdate.Text = _updateButtonText;
+            if (_btnUpdate is GlassButton glass) glass.Accent = true;
+
+            _lblUpdate.ForeColor = Color.FromArgb(120, 210, 140);
+            _lblUpdate.Text = $"Version v{info.Version} is available (you have {AppVersion()}).";
+            Log($"Update available: v{info.Version}" +
+                (info.SizeMb >= 1 ? $" ({info.SizeMb:0} MB)" : "") +
+                $" — click \"{_updateButtonText}\" to install it.");
+        }
+        catch (Exception ex)
+        {
+            // Deliberately silent: this check was nobody's request.
+            Log("Background update check skipped: " + ex.Message);
         }
     }
 
@@ -1099,7 +1160,7 @@ public sealed class MainForm : Form
         if (InvokeRequired) { BeginInvoke(new Action(() => SetStatus(text, color))); return; }
         _status.Text = "● " + text;
         _status.ForeColor = color;
-        _status.Location = new Point(ClientSize.Width - _status.PreferredWidth - 22, 44);
+        _status.Location = new Point(ClientSize.Width - _status.PreferredWidth - 22, _statusY);
     }
 
     // ======================= system tray =======================
